@@ -14385,6 +14385,154 @@ function cssFor(styles, out) {
   }).trim();
 }
 
+// src/lore-sync.ts
+var LORE_SYNC_VERSION = 1;
+var RISU_DEFAULT_SCAN_DEPTH = 5;
+var FIELDS = [
+  "content",
+  "position",
+  "depth",
+  "role",
+  "constant",
+  "disabled",
+  "selective",
+  "keysecondary",
+  "selective_logic",
+  "scan_depth",
+  "probability",
+  "use_probability",
+  "match_whole_words",
+  "prevent_recursion"
+];
+var DECORATOR_LINE = /^@@@?([a-z_]+)(?:[ \t]+(.*))?$/;
+function parseDecorators(content) {
+  const d = {};
+  const kept = [];
+  let found = false;
+  for (const line of content.split(`
+`)) {
+    const m = DECORATOR_LINE.exec(line.trim());
+    if (!m || !line.trimStart().startsWith("@@")) {
+      kept.push(line);
+      continue;
+    }
+    found = true;
+    const name = m[1];
+    const args = (m[2] ?? "").split(",").map((a) => a.trim()).filter(Boolean);
+    const int = parseInt(args[0] ?? "", 10);
+    switch (name) {
+      case "depth":
+        if (!Number.isNaN(int))
+          d.depth = int;
+        break;
+      case "end":
+        d.depth = 0;
+        break;
+      case "scan_depth":
+        if (!Number.isNaN(int))
+          d.scanDepth = int;
+        break;
+      case "role":
+        if (args[0] === "system" || args[0] === "user" || args[0] === "assistant")
+          d.role = args[0];
+        break;
+      case "activate":
+        d.activate = true;
+        break;
+      case "dont_activate":
+        d.dontActivate = true;
+        break;
+      case "recursive":
+        d.recursive = true;
+        break;
+      case "unrecursive":
+        d.recursive = false;
+        break;
+      case "probability":
+        if (!Number.isNaN(int))
+          d.probability = int;
+        break;
+      case "match_full_word":
+        d.fullWord = true;
+        break;
+      case "match_partial_word":
+        d.fullWord = false;
+        break;
+      case "additional_keys":
+        d.additionalKeys = args;
+        break;
+      case "exclude_keys":
+        d.excludeKeys = args;
+        break;
+      case "exclude_keys_all":
+        d.excludeKeys = args;
+        d.excludeAll = true;
+        break;
+      default:
+        break;
+    }
+  }
+  while (found && kept.length && kept[0].trim() === "")
+    kept.shift();
+  return { decorators: d, content: kept.join(`
+`), found };
+}
+function isLoreSynced(e) {
+  return e.extensions?.risubridge?.version === LORE_SYNC_VERSION;
+}
+function matchCardEntry(e, card) {
+  const content = e.extensions?.risubridge?.original?.content ?? e.content;
+  return card.find((c) => (c.content ?? "") === content && (c.comment ?? c.name ?? "") === (e.comment ?? "")) ?? card.find((c) => (c.content ?? "") === content);
+}
+function loreFixFor(e, cardScanDepth) {
+  const original = e.extensions?.risubridge?.original ?? Object.fromEntries(FIELDS.map((f) => [f, e[f]]));
+  const base = { ...e, ...original };
+  const { decorators: d, content } = parseDecorators(base.content);
+  const out = {};
+  if (content !== base.content)
+    out.content = content;
+  if (d.depth !== undefined) {
+    out.position = 4;
+    out.depth = d.depth;
+  }
+  if (d.role)
+    out.role = d.role;
+  if (d.activate)
+    out.constant = true;
+  if (d.dontActivate)
+    out.disabled = true;
+  if (d.recursive !== undefined)
+    out.prevent_recursion = !d.recursive;
+  if (d.probability !== undefined) {
+    out.use_probability = true;
+    out.probability = Math.max(0, Math.min(100, d.probability));
+  }
+  if (d.fullWord !== undefined)
+    out.match_whole_words = d.fullWord;
+  if (!base.selective || base.keysecondary.length === 0) {
+    if (d.additionalKeys?.length) {
+      out.selective = true;
+      out.keysecondary = d.additionalKeys;
+      out.selective_logic = 2;
+    } else if (d.excludeKeys?.length) {
+      out.selective = true;
+      out.keysecondary = d.excludeKeys;
+      out.selective_logic = d.excludeAll ? 3 : 1;
+    }
+  }
+  if (base.scan_depth === null || base.scan_depth === undefined) {
+    const depth = d.scanDepth ?? (cardScanDepth && cardScanDepth > 0 ? cardScanDepth : RISU_DEFAULT_SCAN_DEPTH);
+    out.scan_depth = Math.max(1, depth);
+  }
+  const changed = Object.entries(out).some(([k, v]) => JSON.stringify(e[k]) !== JSON.stringify(v));
+  if (!changed && isLoreSynced(e))
+    return null;
+  return {
+    ...out,
+    extensions: { ...e.extensions ?? {}, risubridge: { version: LORE_SYNC_VERSION, original } }
+  };
+}
+
 // node_modules/fengari/src/fengari.js
 var core = require_fengaricore();
 var $FENGARI_AUTHORS = core.FENGARI_AUTHORS;
@@ -15620,8 +15768,12 @@ async function characterScripts(characterId, userId) {
 async function syncCharacterRegex(characterId, userId, force = false) {
   const ch = await spindle.characters.get(characterId, userId);
   const ext = ch?.extensions ?? {};
-  if (!ext.risuai || ext.risubridge?.regex === false)
+  if (!ext.risuai)
     return 0;
+  if (ext.risubridge?.regex === false) {
+    await syncCharacterLore(ch, userId, force).catch(() => 0);
+    return 0;
+  }
   const styles = backgroundStyles(ext.risuai.backgroundHTML);
   const linked = ext.risubridge?.module;
   let fixed = 0;
@@ -15636,6 +15788,36 @@ async function syncCharacterRegex(characterId, userId, force = false) {
   }
   if (fixed)
     spindle.log.info(`[risubridge] repaired ${fixed} Risu regex script(s) for ${ch?.name ?? characterId}`);
+  await syncCharacterLore(ch, userId, force).catch((err) => spindle.log.warn(`[risubridge] lorebook sync failed for ${ch?.name ?? characterId}: ${err instanceof Error ? err.message : String(err)}`));
+  return fixed;
+}
+async function syncCharacterLore(ch, userId, force = false) {
+  const ext = ch?.extensions ?? {};
+  const book = ext.character_book;
+  if (!ch || !ext.risuai || !book?.entries?.length || !spindle.world_books)
+    return 0;
+  const cardDepth = typeof book.scan_depth === "number" ? book.scan_depth : undefined;
+  let fixed = 0;
+  for (const bookId of ch.world_book_ids ?? []) {
+    for (let offset = 0;; offset += 200) {
+      const page = await spindle.world_books.entries.list(bookId, { limit: 200, offset, ...userId ? { userId } : {} });
+      for (const e of page.data) {
+        if (!force && isLoreSynced(e))
+          continue;
+        if (!matchCardEntry(e, book.entries))
+          continue;
+        const fix = loreFixFor(e, cardDepth);
+        if (!fix)
+          continue;
+        await spindle.world_books.entries.update(e.id, fix, userId);
+        fixed++;
+      }
+      if (page.data.length < 200)
+        break;
+    }
+  }
+  if (fixed)
+    spindle.log.info(`[risubridge] applied Risu lorebook rules to ${fixed} entr${fixed === 1 ? "y" : "ies"} for ${ch.name}`);
   return fixed;
 }
 async function revertCharacterRegex(characterId, userId) {

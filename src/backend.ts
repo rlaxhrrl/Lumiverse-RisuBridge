@@ -3,6 +3,7 @@ import type { MacroInterceptorCtxDTO, MacroInterceptorResultDTO, SpindleAPI } fr
 import { toggleLayout, type TogglesReply } from './toggles'
 import { alreadySynced, backgroundStyles, fixFor, isRisuImported, matchOriginal, revertFor, type ImportedScript } from './regex-sync'
 import type { LinkedRisuData } from './risu-file'
+import { isLoreSynced, loreFixFor, matchCardEntry, type CardLoreEntry, type LoreEntry } from './lore-sync'
 import { findManualTrigger, loadLua, runSimpleTrigger, type RisuTrigger } from './triggers'
 import type { LuaHost } from './lua'
 import { renderCbs, hasRisuSyntax, parseToggles, defaultToggleValue, parseDefaultVariables, type ToggleDef, type CbsPhase } from './cbs'
@@ -178,7 +179,8 @@ async function characterScripts(characterId: string, userId: string | undefined)
 async function syncCharacterRegex(characterId: string, userId: string | undefined, force = false): Promise<number> {
   const ch = await spindle.characters.get(characterId, userId)
   const ext = (ch?.extensions ?? {}) as Record<string, any>
-  if (!ext.risuai || ext.risubridge?.regex === false) return 0
+  if (!ext.risuai) return 0
+  if (ext.risubridge?.regex === false) { await syncCharacterLore(ch, userId, force).catch(() => 0); return 0 }
   const styles = backgroundStyles(ext.risuai.backgroundHTML)
   const linked = ext.risubridge?.module as LinkedRisuData | undefined
   let fixed = 0
@@ -190,6 +192,36 @@ async function syncCharacterRegex(characterId: string, userId: string | undefine
     fixed++
   }
   if (fixed) spindle.log.info(`[risubridge] repaired ${fixed} Risu regex script(s) for ${ch?.name ?? characterId}`)
+  await syncCharacterLore(ch, userId, force).catch((err) =>
+    spindle.log.warn(`[risubridge] lorebook sync failed for ${ch?.name ?? characterId}: ${err instanceof Error ? err.message : String(err)}`))
+  return fixed
+}
+
+/**
+ * Give the card's lorebook Risu's activation rules: scan only the last few messages and
+ * honour `@@decorators`. Only entries that still match the card's own lorebook are touched.
+ */
+async function syncCharacterLore(ch: Awaited<ReturnType<SpindleAPI['characters']['get']>>, userId: string | undefined, force = false): Promise<number> {
+  const ext = (ch?.extensions ?? {}) as Record<string, any>
+  const book = ext.character_book as { scan_depth?: number; entries?: CardLoreEntry[] } | undefined
+  if (!ch || !ext.risuai || !book?.entries?.length || !(spindle as any).world_books) return 0
+  const cardDepth = typeof book.scan_depth === 'number' ? book.scan_depth : undefined
+  let fixed = 0
+  for (const bookId of ch.world_book_ids ?? []) {
+    for (let offset = 0; ; offset += 200) {
+      const page = await spindle.world_books.entries.list(bookId, { limit: 200, offset, ...(userId ? { userId } : {}) })
+      for (const e of page.data as unknown as LoreEntry[]) {
+        if (!force && isLoreSynced(e)) continue
+        if (!matchCardEntry(e, book.entries)) continue
+        const fix = loreFixFor(e, cardDepth)
+        if (!fix) continue
+        await spindle.world_books.entries.update(e.id, fix as never, userId)
+        fixed++
+      }
+      if (page.data.length < 200) break
+    }
+  }
+  if (fixed) spindle.log.info(`[risubridge] applied Risu lorebook rules to ${fixed} entr${fixed === 1 ? 'y' : 'ies'} for ${ch.name}`)
   return fixed
 }
 

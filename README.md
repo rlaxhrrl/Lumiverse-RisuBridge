@@ -34,6 +34,15 @@ Lumiverse는 리스 카드의 정규식을 가져올 때 켜짐/꺼짐을 거꾸
 
 알려진 한계: Lumiverse가 가져올 때 정규식의 커스텀 플래그(`<move_top>`, `i` 등)를 버려서 복구할 수 없습니다.
 
+## 로어북 (5단계)
+
+리스는 로어북 키워드를 **최근 메시지 몇 개(카드 설정, 기본 5개)** 에서만 찾지만, Lumiverse는 기본으로 채팅 전체를 뒤집니다.
+그래서 `/프로필` 같은 명령어를 한 번 치면 그 지시가 영원히 켜져 있었어요. 이 확장은 카드 로어북을 리스처럼 맞춥니다.
+
+- 카드의 스캔 깊이(없으면 5)를 각 항목에 넣음 (직접 정해 둔 값은 그대로)
+- 리스 데코레이터 해석 후 내용에서 제거: `@@depth`, `@@end`, `@@scan_depth`, `@@role`, `@@activate`, `@@dont_activate`, `@@recursive`/`@@unrecursive`, `@@probability`, `@@match_full_word`, `@@additional_keys`, `@@exclude_keys`
+- 카드 원래 로어북과 내용이 같은 항목만 고치고, 원래 값은 보관해 둠
+
 ## 버튼과 Lua (4단계)
 
 Lumiverse는 카드를 가져올 때 리스의 트리거와 Lua를 버립니다. 이 확장은 **카드를 가져오는 순간 원본 파일에서 그 부분을 따로 읽어 자동으로 연결**합니다
@@ -53,7 +62,8 @@ Lumiverse는 카드를 가져올 때 리스의 트리거와 Lua를 버립니다.
 ## 설치
 
 Lumiverse → Extensions → Install from GitHub → 이 저장소 주소.
-권한 `macro_interceptor`, `characters`, `chats`, `chat_mutation`(메시지 읽기), `regex_scripts`, `regex_scripts_unrestricted`, `interceptor`(editRequest)를 허용해 주세요.
+권한 `macro_interceptor`, `characters`, `chats`, `chat_mutation`(메시지 읽기), `regex_scripts`, `regex_scripts_unrestricted`, `interceptor`(editRequest), `world_books`(로어북)를 허용해 주세요.
+0.5.0으로 업데이트하면 `world_books` 권한을 한 번 더 허용해야 로어북 맞춤이 작동합니다.
 
 ## 개발
 

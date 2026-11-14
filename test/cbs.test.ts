@@ -198,3 +198,51 @@ test('a card\'s scripts are grouped in one folder (and ungrouped on revert)', ()
   expect(revertFor({ ...s, ...d, target: ['display'] })?.folder).toBe('')
   expect(fixFor({ ...s, folder: '내 폴더' }, '', undefined, 'ALTAIS').folder).toBeUndefined()
 })
+
+// ─────────── lorebook rules ───────────
+import { loreFixFor, loreRevertFor, parseDecorators, matchCardEntry, type LoreEntry } from '../src/lore-sync'
+
+const loreEntry = (over: Partial<LoreEntry> = {}): LoreEntry => ({
+  id: 'e1', key: ['/프로필'], keysecondary: [], content: '## Generate Adoption Profile', comment: '입양프로필 명령어',
+  position: 0, depth: 4, role: null, constant: false, disabled: false, selective: false, selective_logic: 0,
+  scan_depth: null, probability: 100, use_probability: false, match_whole_words: false, prevent_recursion: false,
+  extensions: {}, ...over,
+})
+
+test('lore: command entries only scan the card depth', () => {
+  const fix = loreFixFor(loreEntry(), 5)!
+  expect(fix.scan_depth).toBe(5)
+  expect(fix.content).toBeUndefined()
+  expect(loreFixFor(loreEntry(), undefined)!.scan_depth).toBe(5)
+})
+
+test('lore: decorators are applied and stripped', () => {
+  const e = loreEntry({ key: ['/생성'], content: '@@depth 0\n@@scan_depth 1\n@@recursive\n\n{{hiddenkey::x}}\nBody' })
+  const fix = loreFixFor(e, 5)!
+  expect(fix.content).toBe('{{hiddenkey::x}}\nBody')
+  expect(fix.position).toBe(4)
+  expect(fix.depth).toBe(0)
+  expect(fix.scan_depth).toBe(1)
+  expect(fix.prevent_recursion).toBe(false)
+  const synced = { ...e, ...fix } as LoreEntry
+  expect(loreFixFor(synced, 5)).toBeNull()
+  expect(matchCardEntry(synced, [{ content: e.content, comment: e.comment }])).toBeTruthy()
+  const back = loreRevertFor(synced)!
+  expect(back.content).toBe(e.content)
+  expect(back.scan_depth).toBeNull()
+})
+
+test('lore: keeps a hand-set scan depth', () => {
+  expect(loreFixFor(loreEntry({ scan_depth: 1 }), 5)!.scan_depth).toBeUndefined()
+})
+
+test('lore: keys and role decorators', () => {
+  const d = parseDecorators('@@role user\n@@additional_keys a, b\n@@activate\ntext').decorators
+  expect(d.role).toBe('user')
+  expect(d.additionalKeys).toEqual(['a', 'b'])
+  expect(d.activate).toBe(true)
+  const fix = loreFixFor(loreEntry({ content: '@@exclude_keys x\nT' }), 5)!
+  expect(fix.selective).toBe(true)
+  expect(fix.keysecondary).toEqual(['x'])
+  expect(fix.selective_logic).toBe(1)
+})
