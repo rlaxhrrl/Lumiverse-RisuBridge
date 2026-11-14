@@ -1061,7 +1061,8 @@ function setup(ctx) {
     }
     if (msg?.type === "toggles") {
       render(payload);
-      refreshDisplay();
+      if (payload.changed)
+        refreshDisplay();
     } else if (msg?.type === "risu_prompt")
       showPrompt(payload);
     else if (msg?.type === "risu_notice")

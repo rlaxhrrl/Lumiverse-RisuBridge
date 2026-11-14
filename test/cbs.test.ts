@@ -116,7 +116,7 @@ describe('Risu regex repair', () => {
   const base = { id: 'x', name: 'n', find_regex: 'a', flags: 'gs', placement: ['ai_output'], target: ['display'], substitute_macros: 'none' }
   test('turns working scripts on, keeps creator-disabled ones off, maps targets', () => {
     const d = fixFor({ ...base, replace_string: '<div class="s">$1</div>', disabled: true, metadata: { source: 'risuai_module', original_type: 'editdisplay' } }, '<style>.s{}</style>')
-    expect(d).toMatchObject({ disabled: false, target: 'display', flags: 'g', substitute_macros: 'raw', placement: ['ai_output', 'user_input'] })
+    expect(d).toMatchObject({ disabled: false, target: 'display', flags: 'g', substitute_macros: 'none', placement: ['ai_output', 'user_input'] })
     expect(d.replace_string).toBe('<style>.s{}</style>\n<div class="s">$1</div>')
     const off = fixFor({ ...base, replace_string: 'x', disabled: false, metadata: { source: 'risuai_module', original_type: 'disabled' } }, '')
     expect(off.disabled).toBe(true)
@@ -184,4 +184,9 @@ import { cssFor } from '../src/regex-sync'
 test('only the stylesheet rules a replacement uses are copied', () => {
   const css = '<style>.chat{color:red} .card{x:1} img{y:2} @media (max-width:1px){.card{z:3} .chat{w:4}} @font-face{font-family:A}</style>'
   expect(cssFor(css, '<div class="chat">$1</div>')).toBe('<style>.chat{color:red} img{y:2} @media (max-width:1px){ .chat{w:4}} @font-face{font-family:A}</style>')
+})
+
+test('scripts with macros keep the macro pass', () => {
+  const d = fixFor({ id: 'x', name: 'n', find_regex: 'a', flags: 'g', placement: [], target: ['display'], substitute_macros: 'none', disabled: true, replace_string: '{{getvar::x}}$1', metadata: { original_type: 'editdisplay' } }, '')
+  expect(d.substitute_macros).toBe('raw')
 })

@@ -312,7 +312,7 @@ export function setup(ctx: SpindleFrontendContext) {
   const offMsg = ctx.onBackendMessage((payload) => {
     const msg = payload as { type?: string; error?: string }
     if (msg?.type === 'risu_reload') { refreshDisplay(); return }
-    if (msg?.type === 'toggles') { render(payload as TogglesReply); refreshDisplay() }
+    if (msg?.type === 'toggles') { render(payload as TogglesReply); if ((payload as { changed?: boolean }).changed) refreshDisplay() }
     else if (msg?.type === 'risu_prompt') showPrompt(payload as { id: string; message?: string; kind?: string; options?: string[] })
     else if (msg?.type === 'risu_notice') notice(String((payload as { message?: string }).message ?? ''))
     else if (msg?.type === 'toggles_error' && body) body.textContent = msg.error === 'no_chat' ? '채팅을 찾을 수 없어요.' : `오류: ${msg.error}`

@@ -14190,7 +14190,7 @@ function toggleLayout(src, current) {
 }
 
 // src/regex-sync.ts
-var SYNC_VERSION = 3;
+var SYNC_VERSION = 4;
 function countGroups(src) {
   let n = 0;
   let inClass = false;
@@ -14241,6 +14241,7 @@ function risuFlags(orig) {
     letters = letters.replace(/[gm]/g, "");
   return { flags: letters, moveTop };
 }
+var MACRO_RE = /\{\{|<(?:user|char|bot)>/i;
 var HTML_RE = /<(?:div|span|img|section|details|table|p|ul|button|label|svg|a)\b|\{\{\s*(?:img|image|asset|emotion)::/i;
 function backgroundStyles(backgroundHTML) {
   if (!backgroundHTML)
@@ -14300,7 +14301,7 @@ ${out}` : out;
     flags: f.flags,
     placement,
     target,
-    substitute_macros: "raw",
+    substitute_macros: MACRO_RE.test(moved ? moved.out : withStyles) || MACRO_RE.test(original.find_regex ?? s.find_regex) ? "raw" : "none",
     disabled: type === "disabled",
     metadata: { ...withoutQuarantine(meta), risubridge: { version: SYNC_VERSION, original, linked: Boolean(orig) } }
   };
@@ -15524,7 +15525,24 @@ function riskIndex(env, messages) {
   const lumiIndex = Number.isFinite(dyn) && env.dynamicMacros?.chat_index !== undefined ? dyn : lumiLast;
   return { chatIndex: lumiIndex - offset, lastMessageId: lumiLast - offset };
 }
+var perf = { calls: 0, risu: 0, ms: 0 };
+setInterval(() => {
+  if (perf.risu)
+    spindle.log.info(`[risubridge:perf] ${perf.risu}/${perf.calls} macro passes handled in ${perf.ms.toFixed(0)}ms`);
+  perf.calls = 0;
+  perf.risu = 0;
+  perf.ms = 0;
+}, 1e4);
 async function intercept(ctx) {
+  perf.calls++;
+  const started = performance.now();
+  try {
+    return await interceptInner(ctx);
+  } finally {
+    perf.ms += performance.now() - started;
+  }
+}
+async function interceptInner(ctx) {
   const template = ctx.template;
   if (!template.includes("{{"))
     return;
@@ -15535,6 +15553,7 @@ async function intercept(ctx) {
   const info = await cardInfo(characterId, ctx.userId);
   if (!info.isRisu || !hasRisuSyntax(template))
     return;
+  perf.risu++;
   const chatVars = ctx.env.variables.chat ?? {};
   const globalVars = ctx.env.variables.global ?? {};
   const toggleDefs = new Map(info.toggles.map((t) => [t.key, t]));
@@ -15573,7 +15592,7 @@ async function intercept(ctx) {
   return { text, touchedVars: [...result.touched], volatile: result.volatile };
 }
 var lastSync = new Map;
-var SYNC_EVERY_MS = 60000;
+var SYNC_EVERY_MS = 10 * 60000;
 function scheduleSync(characterId, userId) {
   const key = `${userId ?? ""}:${characterId}`;
   const at = lastSync.get(key) ?? 0;
@@ -15898,7 +15917,7 @@ spindle.onFrontendMessage(async (payload, userId) => {
     } else if (msg.type !== "get_toggles") {
       return;
     }
-    spindle.sendToFrontend(await buildTogglesReply(chatId, characterId, userId), userId);
+    spindle.sendToFrontend({ ...await buildTogglesReply(chatId, characterId, userId), changed: msg.type !== "get_toggles" }, userId);
   } catch (err) {
     spindle.sendToFrontend({ type: "toggles_error", error: err instanceof Error ? err.message : String(err) }, userId);
   }

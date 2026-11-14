@@ -89,7 +89,20 @@ function riskIndex(env: MacroInterceptorCtxDTO['env'], messages: Array<{ is_user
   return { chatIndex: lumiIndex - offset, lastMessageId: lumiLast - offset }
 }
 
+// Cheap self-timing so slowness can be traced from the server log.
+const perf = { calls: 0, risu: 0, ms: 0 }
+setInterval(() => {
+  if (perf.risu) spindle.log.info(`[risubridge:perf] ${perf.risu}/${perf.calls} macro passes handled in ${perf.ms.toFixed(0)}ms`)
+  perf.calls = 0; perf.risu = 0; perf.ms = 0
+}, 10_000)
+
 async function intercept(ctx: MacroInterceptorCtxDTO): Promise<MacroInterceptorResultDTO> {
+  perf.calls++
+  const started = performance.now()
+  try { return await interceptInner(ctx) } finally { perf.ms += performance.now() - started }
+}
+
+async function interceptInner(ctx: MacroInterceptorCtxDTO): Promise<MacroInterceptorResultDTO> {
   const template = ctx.template
   if (!template.includes('{{')) return undefined
 
@@ -99,6 +112,7 @@ async function intercept(ctx: MacroInterceptorCtxDTO): Promise<MacroInterceptorR
   // Looked up (cached) even without Risu syntax so the card's regex gets repaired early.
   const info = await cardInfo(characterId, ctx.userId)
   if (!info.isRisu || !hasRisuSyntax(template)) return undefined
+  perf.risu++
 
   const chatVars = ctx.env.variables.chat ?? {}
   const globalVars = ctx.env.variables.global ?? {}
@@ -139,7 +153,7 @@ async function intercept(ctx: MacroInterceptorCtxDTO): Promise<MacroInterceptorR
 // ─────────── stage 3: repair imported Risu regex scripts ───────────
 
 const lastSync = new Map<string, number>()
-const SYNC_EVERY_MS = 60_000
+const SYNC_EVERY_MS = 10 * 60_000
 
 function scheduleSync(characterId: string, userId: string | undefined) {
   const key = `${userId ?? ''}:${characterId}`
@@ -440,7 +454,7 @@ spindle.onFrontendMessage(async (payload, userId) => {
     } else if (msg.type !== 'get_toggles') {
       return
     }
-    spindle.sendToFrontend(await buildTogglesReply(chatId, characterId, userId), userId)
+    spindle.sendToFrontend({ ...(await buildTogglesReply(chatId, characterId, userId)), changed: msg.type !== 'get_toggles' }, userId)
   } catch (err) {
     spindle.sendToFrontend({ type: 'toggles_error', error: err instanceof Error ? err.message : String(err) }, userId)
   }

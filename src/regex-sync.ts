@@ -23,7 +23,7 @@ export interface ImportedScript {
 
 import type { RisuRegexSource } from './risu-file'
 
-export const SYNC_VERSION = 3
+export const SYNC_VERSION = 4
 
 /** Number of capturing groups in a JS regex source. */
 export function countGroups(src: string): number {
@@ -76,6 +76,7 @@ export interface ScriptFix {
   metadata: Record<string, unknown>
 }
 
+const MACRO_RE = /\{\{|<(?:user|char|bot)>/i
 const HTML_RE = /<(?:div|span|img|section|details|table|p|ul|button|label|svg|a)\b|\{\{\s*(?:img|image|asset|emotion)::/i
 
 /** Collect every `<style>` block from the card's backgroundHTML. */
@@ -140,7 +141,9 @@ export function fixFor(s: ImportedScript, bgStyles: string, orig?: RisuRegexSour
     flags: f.flags,
     placement,
     target,
-    substitute_macros: 'raw',
+    // Macro passes are the expensive part of display rendering; only pay for them when
+    // the script actually contains macros. Plain scripts then run in the browser worker.
+    substitute_macros: MACRO_RE.test(moved ? moved.out : withStyles) || MACRO_RE.test(original.find_regex ?? s.find_regex) ? 'raw' : 'none',
     disabled: type === 'disabled',
     metadata: { ...withoutQuarantine(meta), risubridge: { version: SYNC_VERSION, original, linked: Boolean(orig) } },
   }
