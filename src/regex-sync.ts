@@ -23,7 +23,7 @@ export interface ImportedScript {
 
 import type { RisuRegexSource } from './risu-file'
 
-export const SYNC_VERSION = 2
+export const SYNC_VERSION = 3
 
 /** Number of capturing groups in a JS regex source. */
 export function countGroups(src: string): number {
@@ -129,7 +129,8 @@ export function fixFor(s: ImportedScript, bgStyles: string, orig?: RisuRegexSour
 
   // Display HTML is rendered in an isolated island; carry the card's stylesheet into it,
   // which also keeps rules like `img { ... }` from leaking into the rest of Lumiverse.
-  const withStyles = target === 'display' && bgStyles && HTML_RE.test(out) ? `${bgStyles}\n${out}` : out
+  const css = target === 'display' && bgStyles && HTML_RE.test(out) ? cssFor(bgStyles, out) : ''
+  const withStyles = css ? `${css}\n${out}` : out
   const f = risuFlags(orig)
   const moved = f.moveTop ? moveTop(original.find_regex ?? s.find_regex, withStyles) : null
 
@@ -141,8 +142,16 @@ export function fixFor(s: ImportedScript, bgStyles: string, orig?: RisuRegexSour
     target,
     substitute_macros: 'raw',
     disabled: type === 'disabled',
-    metadata: { ...meta, risubridge: { version: SYNC_VERSION, original, linked: Boolean(orig) } },
+    metadata: { ...withoutQuarantine(meta), risubridge: { version: SYNC_VERSION, original, linked: Boolean(orig) } },
   }
+}
+
+/** A repaired script gets a fresh start: drop a quarantine earned by its old, heavier form. */
+function withoutQuarantine(meta: Record<string, unknown>): Record<string, unknown> {
+  const ev = meta.regex_evidence as Record<string, unknown> | undefined
+  if (!ev || typeof ev !== 'object' || !('quarantined' in ev)) return meta
+  const { quarantined: _q, ...rest } = ev
+  return { ...meta, regex_evidence: rest }
 }
 
 /** Values that restore exactly what Lumiverse imported. */
@@ -161,4 +170,48 @@ export function revertFor(s: ImportedScript): Partial<ScriptFix> | null {
     disabled: original.disabled,
     metadata: meta,
   }
+}
+
+/**
+ * Keep only the stylesheet rules a replacement can actually use. Cards often ship one big
+ * stylesheet for everything; copying all of it into every match (e.g. each chat line)
+ * makes messages huge and slow to render. A rule is kept when it has no class/id
+ * selector, or when one of its classes/ids appears anywhere in the replacement.
+ */
+export function cssFor(styles: string, out: string): string {
+  if (!styles) return ''
+  const words = new Set(out.match(/[A-Za-z_][\w-]*/g) ?? [])
+  const keepSelector = (sel: string) => {
+    const names = sel.match(/[.#]([A-Za-z_][\w-]*)/g)
+    if (!names) return true
+    return names.some((n) => words.has(n.slice(1)))
+  }
+  const filterBlock = (css: string): string => {
+    let outCss = ''
+    let i = 0
+    while (i < css.length) {
+      const open = css.indexOf('{', i)
+      if (open < 0) { outCss += css.slice(i); break }
+      const head = css.slice(i, open)
+      // find matching close brace
+      let depth = 1, j = open + 1
+      while (j < css.length && depth > 0) { if (css[j] === '{') depth++; else if (css[j] === '}') depth--; j++ }
+      const body = css.slice(open + 1, j - 1)
+      const h = head.trim()
+      if (h.startsWith('@media') || h.startsWith('@supports') || h.startsWith('@container')) {
+        const inner = filterBlock(body)
+        if (inner.trim()) outCss += `${head}{${inner}}`
+      } else if (h.startsWith('@')) {
+        outCss += `${head}{${body}}` // @font-face, @keyframes, @import ... keep
+      } else if (h.split(',').some(keepSelector)) {
+        outCss += `${head}{${body}}`
+      }
+      i = j
+    }
+    return outCss
+  }
+  return styles.replace(/<style([^>]*)>([\s\S]*?)<\/style>/gi, (_m, attrs, css) => {
+    const kept = filterBlock(css)
+    return kept.trim() ? `<style${attrs}>${kept}</style>` : ''
+  }).trim()
 }

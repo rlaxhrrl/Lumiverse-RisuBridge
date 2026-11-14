@@ -14190,7 +14190,7 @@ function toggleLayout(src, current) {
 }
 
 // src/regex-sync.ts
-var SYNC_VERSION = 2;
+var SYNC_VERSION = 3;
 function countGroups(src) {
   let n = 0;
   let inClass = false;
@@ -14289,7 +14289,8 @@ function fixFor(s, bgStyles, orig) {
     target = "prompt";
     placement = ["ai_output", "user_input"];
   }
-  const withStyles = target === "display" && bgStyles && HTML_RE.test(out) ? `${bgStyles}
+  const css = target === "display" && bgStyles && HTML_RE.test(out) ? cssFor(bgStyles, out) : "";
+  const withStyles = css ? `${css}
 ${out}` : out;
   const f = risuFlags(orig);
   const moved = f.moveTop ? moveTop(original.find_regex ?? s.find_regex, withStyles) : null;
@@ -14301,8 +14302,15 @@ ${out}` : out;
     target,
     substitute_macros: "raw",
     disabled: type === "disabled",
-    metadata: { ...meta, risubridge: { version: SYNC_VERSION, original, linked: Boolean(orig) } }
+    metadata: { ...withoutQuarantine(meta), risubridge: { version: SYNC_VERSION, original, linked: Boolean(orig) } }
   };
+}
+function withoutQuarantine(meta) {
+  const ev = meta.regex_evidence;
+  if (!ev || typeof ev !== "object" || !("quarantined" in ev))
+    return meta;
+  const { quarantined: _q, ...rest } = ev;
+  return { ...meta, regex_evidence: rest };
 }
 function revertFor(s) {
   const meta = { ...s.metadata ?? {} };
@@ -14320,6 +14328,54 @@ function revertFor(s) {
     disabled: original.disabled,
     metadata: meta
   };
+}
+function cssFor(styles, out) {
+  if (!styles)
+    return "";
+  const words = new Set(out.match(/[A-Za-z_][\w-]*/g) ?? []);
+  const keepSelector = (sel) => {
+    const names = sel.match(/[.#]([A-Za-z_][\w-]*)/g);
+    if (!names)
+      return true;
+    return names.some((n) => words.has(n.slice(1)));
+  };
+  const filterBlock = (css) => {
+    let outCss = "";
+    let i = 0;
+    while (i < css.length) {
+      const open = css.indexOf("{", i);
+      if (open < 0) {
+        outCss += css.slice(i);
+        break;
+      }
+      const head = css.slice(i, open);
+      let depth = 1, j = open + 1;
+      while (j < css.length && depth > 0) {
+        if (css[j] === "{")
+          depth++;
+        else if (css[j] === "}")
+          depth--;
+        j++;
+      }
+      const body = css.slice(open + 1, j - 1);
+      const h = head.trim();
+      if (h.startsWith("@media") || h.startsWith("@supports") || h.startsWith("@container")) {
+        const inner = filterBlock(body);
+        if (inner.trim())
+          outCss += `${head}{${inner}}`;
+      } else if (h.startsWith("@")) {
+        outCss += `${head}{${body}}`;
+      } else if (h.split(",").some(keepSelector)) {
+        outCss += `${head}{${body}}`;
+      }
+      i = j;
+    }
+    return outCss;
+  };
+  return styles.replace(/<style([^>]*)>([\s\S]*?)<\/style>/gi, (_m, attrs, css) => {
+    const kept = filterBlock(css);
+    return kept.trim() ? `<style${attrs}>${kept}</style>` : "";
+  }).trim();
 }
 
 // node_modules/fengari/src/fengari.js
