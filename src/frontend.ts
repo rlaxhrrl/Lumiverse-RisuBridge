@@ -308,6 +308,37 @@ export function setup(ctx: SpindleFrontendContext) {
   document.addEventListener('change', onFileChange, true)
   document.addEventListener('drop', onDrop, true)
 
+  // ── Let Risu panels that use `position: fixed` cover the screen like they do in Risu ──
+  // Lumiverse puts `contain: layout` on chat rows, which turns `fixed` into "fixed to the
+  // message", so side panels open off-screen. Lift that containment only above islands
+  // whose own CSS uses fixed positioning.
+  const FIXED_RE = /position\s*:\s*fixed/i
+  function releaseFixed() {
+    for (const host of Array.from(document.querySelectorAll<HTMLElement>('[data-lumiverse-html-island]'))) {
+      const root = host.shadowRoot
+      if (!root) continue
+      const css = Array.from(root.querySelectorAll('style')).map((st) => st.textContent ?? '').join('\n')
+      if (!FIXED_RE.test(css) && !FIXED_RE.test(root.innerHTML.slice(0, 200_000))) continue
+      for (let el: HTMLElement | null = host.parentElement; el && el !== document.body; el = el.parentElement) {
+        if (el.dataset.risuUncontained === '1') continue
+        const cs = getComputedStyle(el)
+        if (cs.contain && cs.contain !== 'none') {
+          el.style.setProperty('contain', 'none', 'important')
+          el.dataset.risuUncontained = '1'
+        }
+      }
+    }
+  }
+  let fixedTimer: ReturnType<typeof setTimeout> | null = null
+  const scheduleRelease = () => {
+    if (fixedTimer) return
+    fixedTimer = setTimeout(() => { fixedTimer = null; try { releaseFixed() } catch { /* ignore */ } }, 400)
+  }
+  const fixedObserver = new MutationObserver(scheduleRelease)
+  fixedObserver.observe(document.body, { childList: true, subtree: true })
+  document.addEventListener('click', scheduleRelease, true)
+  scheduleRelease()
+
   const offClick = action.onClick(open)
   const offMsg = ctx.onBackendMessage((payload) => {
     const msg = payload as { type?: string; error?: string }
@@ -324,6 +355,9 @@ export function setup(ctx: SpindleFrontendContext) {
     document.removeEventListener('click', onDocClick, true)
     document.removeEventListener('change', onFileChange, true)
     document.removeEventListener('drop', onDrop, true)
+    document.removeEventListener('click', scheduleRelease, true)
+    fixedObserver.disconnect()
+    if (fixedTimer) clearTimeout(fixedTimer)
     action.destroy()
     modal?.dismiss()
   }
