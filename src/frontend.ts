@@ -16,8 +16,10 @@ const CSS = `
 .rb-row input[type=checkbox]{width:20px;height:20px}
 .rb-changed{font-size:11px;opacity:.6;margin-left:6px}
 .rb-foot{display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:8px}
-.rb-btn{padding:6px 12px;border-radius:8px;border:1px solid color-mix(in srgb,currentColor 25%,transparent);background:transparent;color:inherit;font:inherit;cursor:pointer}
+.rb-btn{white-space:nowrap;flex-shrink:0;padding:6px 12px;border-radius:8px;border:1px solid color-mix(in srgb,currentColor 25%,transparent);background:transparent;color:inherit;font:inherit;cursor:pointer}
 .rb-empty{opacity:.7}
+.rb-regex{margin-top:6px;padding:10px;border-radius:10px;background:color-mix(in srgb,currentColor 6%,transparent);display:flex;flex-direction:column;gap:8px}
+.rb-regex-row{display:flex;justify-content:space-between;align-items:center;gap:8px}
 `
 
 export function setup(ctx: SpindleFrontendContext) {
@@ -115,10 +117,36 @@ export function setup(ctx: SpindleFrontendContext) {
       head.className = 'rb-empty'
       head.textContent = `${reply.characterName} 카드에는 토글이 없어요.`
       body.append(head)
-      return
+    } else {
+      head.textContent = `${reply.characterName} · 이 채팅에만 적용돼요. 다음 답변부터 반영됩니다.`
+      body.append(head, ...reply.rows.map(rowEl))
     }
-    head.textContent = `${reply.characterName} · 이 채팅에만 적용돼요. 다음 답변부터 반영됩니다.`
-    body.append(head, ...reply.rows.map(rowEl))
+    if (reply.regex && reply.regex.total > 0) {
+      const box = document.createElement('div')
+      box.className = 'rb-regex'
+      const title = document.createElement('div')
+      title.className = 'rb-group'
+      title.style.marginTop = '0'
+      title.textContent = '리스 정규식 (상태창·화면 꾸미기)'
+      const line = document.createElement('div')
+      line.className = 'rb-regex-row'
+      const info = document.createElement('span')
+      const btn = document.createElement('button')
+      btn.className = 'rb-btn'
+      if (reply.regexOptOut || reply.regex.synced === 0) {
+        info.textContent = `${reply.regex.total}개 · 리스 방식으로 고치지 않음`
+        btn.textContent = '리스처럼 적용'
+        btn.addEventListener('click', () => { btn.disabled = true; send({ type: 'regex_apply', chatId: currentChat }) })
+      } else {
+        info.textContent = `${reply.regex.total}개 중 ${reply.regex.active}개 켜짐 (제작자가 꺼둔 건 꺼진 채로)`
+        btn.textContent = '원래대로'
+        btn.addEventListener('click', () => { btn.disabled = true; send({ type: 'regex_revert', chatId: currentChat }) })
+      }
+      line.append(info, btn)
+      box.append(title, line)
+      body.append(box)
+    }
+    if (!settable.length && !(reply.regex && reply.regex.total > 0)) return
     const foot = document.createElement('div')
     foot.className = 'rb-foot'
     const reset = document.createElement('button')

@@ -30,6 +30,75 @@ function toggleLayout(src, current) {
   return rows;
 }
 
+// src/regex-sync.ts
+var SYNC_VERSION = 1;
+var HTML_RE = /<(?:div|span|img|section|details|table|p|ul|button|label|svg|a)\b|\{\{\s*(?:img|image|asset|emotion)::/i;
+function backgroundStyles(backgroundHTML) {
+  if (!backgroundHTML)
+    return "";
+  return (backgroundHTML.match(/<style[\s\S]*?<\/style>/gi) ?? []).join(`
+`);
+}
+function isRisuImported(s) {
+  return s.metadata?.source === "risuai_module";
+}
+function alreadySynced(s) {
+  const meta = s.metadata ?? {};
+  return meta.risubridge?.version === SYNC_VERSION;
+}
+function fixFor(s, bgStyles) {
+  const meta = { ...s.metadata ?? {} };
+  const type = String(meta.original_type ?? "editdisplay");
+  const original = meta.risubridge?.original ?? {
+    replace_string: s.replace_string,
+    flags: s.flags,
+    placement: s.placement,
+    target: s.target,
+    substitute_macros: s.substitute_macros,
+    disabled: s.disabled
+  };
+  const out = original.replace_string;
+  let target = "display";
+  let placement = ["ai_output", "user_input"];
+  if (type === "editoutput") {
+    target = "response";
+    placement = ["ai_output"];
+  } else if (type === "editinput") {
+    target = "response";
+    placement = ["user_input"];
+  } else if (type === "editprocess") {
+    target = "prompt";
+    placement = ["ai_output", "user_input"];
+  }
+  const withStyles = target === "display" && bgStyles && HTML_RE.test(out) ? `${bgStyles}
+${out}` : out;
+  return {
+    replace_string: withStyles,
+    flags: "g",
+    placement,
+    target,
+    substitute_macros: "raw",
+    disabled: type === "disabled",
+    metadata: { ...meta, risubridge: { version: SYNC_VERSION, original } }
+  };
+}
+function revertFor(s) {
+  const meta = { ...s.metadata ?? {} };
+  const original = meta.risubridge?.original;
+  if (!original)
+    return null;
+  delete meta.risubridge;
+  return {
+    replace_string: original.replace_string,
+    flags: original.flags,
+    placement: original.placement,
+    target: original.target,
+    substitute_macros: original.substitute_macros,
+    disabled: original.disabled,
+    metadata: meta
+  };
+}
+
 // src/cbs.ts
 var MAX_DEPTH = 40;
 function tokenize(src) {
@@ -728,6 +797,27 @@ function parseDefaultVariables(src) {
 }
 
 // src/backend.ts
+function assetMapOf(ext) {
+  const map = new Map;
+  const names = [];
+  const add = (name, id) => {
+    if (typeof id !== "string" || !id)
+      return;
+    if (!names.includes(name))
+      names.push(name);
+    for (const k of [name, name.replace(/\.[a-z0-9]+$/i, "")]) {
+      const low = k.toLowerCase();
+      if (!map.has(low))
+        map.set(low, id);
+    }
+  };
+  for (const [k, v] of Object.entries(ext.risu_asset_map ?? {}))
+    add(k, v);
+  for (const [k, v] of Object.entries(ext.expressions?.mappings ?? {}))
+    add(k, v);
+  return { map, names };
+}
+var imageUrl = (id) => `/api/v1/images/${encodeURIComponent(id)}`;
 var CACHE_MS = 15000;
 var cardCache = new Map;
 async function cardInfo(characterId, userId) {
@@ -735,7 +825,7 @@ async function cardInfo(characterId, userId) {
   const hit = cardCache.get(key);
   if (hit && Date.now() - hit.fetchedAt < CACHE_MS)
     return hit;
-  let info = { isRisu: false, toggles: [], defaults: {}, fetchedAt: Date.now() };
+  let info = { isRisu: false, toggles: [], defaults: {}, assets: new Map, assetNames: [], charImageId: null, fetchedAt: Date.now() };
   try {
     const ch = await spindle.characters.get(characterId, userId);
     const ext = ch?.extensions ?? {};
@@ -746,8 +836,14 @@ async function cardInfo(characterId, userId) {
         isRisu: true,
         toggles: parseToggles(typeof risu.toggles === "string" ? risu.toggles : ""),
         defaults: parseDefaultVariables(typeof risu.defaultVariables === "string" ? risu.defaultVariables : ""),
+        ...(() => {
+          const a = assetMapOf(ext);
+          return { assets: a.map, assetNames: a.names };
+        })(),
+        charImageId: ch?.image_id ?? null,
         fetchedAt: Date.now()
       };
+      scheduleSync(characterId, userId);
     }
   } catch (err) {
     spindle.log.warn(`[risubridge] could not read character ${characterId}: ${err instanceof Error ? err.message : String(err)}`);
@@ -772,14 +868,14 @@ function riskIndex(env, messages) {
 }
 async function intercept(ctx) {
   const template = ctx.template;
-  if (!template.includes("{{") || !hasRisuSyntax(template))
+  if (!template.includes("{{"))
     return;
   const extra = ctx.env.extra ?? {};
   const characterId = typeof extra.characterId === "string" ? extra.characterId : undefined;
   if (!characterId)
     return;
   const info = await cardInfo(characterId, ctx.userId);
-  if (!info.isRisu)
+  if (!info.isRisu || !hasRisuSyntax(template))
     return;
   const chatVars = ctx.env.variables.chat ?? {};
   const globalVars = ctx.env.variables.global ?? {};
@@ -800,7 +896,16 @@ async function intercept(ctx) {
     chatIndex: idx.chatIndex,
     lastMessageId: idx.lastMessageId,
     previousCharChat: [...messages].reverse().find((m) => m && !m.is_user)?.content ?? "",
-    previousUserChat: [...messages].reverse().find((m) => m && m.is_user)?.content ?? ""
+    previousUserChat: [...messages].reverse().find((m) => m && m.is_user)?.content ?? "",
+    assetUrl: (name) => {
+      if (name === "__source_char")
+        return info.charImageId ? imageUrl(info.charImageId) : undefined;
+      if (name.startsWith("__source_"))
+        return;
+      const id = info.assets.get(name.toLowerCase()) ?? info.assets.get(name.toLowerCase().replace(/\.[a-z0-9]+$/i, ""));
+      return id ? imageUrl(id) : undefined;
+    },
+    assetNames: () => info.assetNames
   });
   let text = result.text;
   if (ctx.commit && ctx.phase !== "prompt" && sets.length) {
@@ -809,6 +914,86 @@ async function intercept(ctx) {
   }
   return { text, touchedVars: [...result.touched], volatile: result.volatile };
 }
+var lastSync = new Map;
+var SYNC_EVERY_MS = 60000;
+function scheduleSync(characterId, userId) {
+  const key = `${userId ?? ""}:${characterId}`;
+  const at = lastSync.get(key) ?? 0;
+  if (Date.now() - at < SYNC_EVERY_MS)
+    return;
+  lastSync.set(key, Date.now());
+  syncCharacterRegex(characterId, userId).catch((err) => spindle.log.warn(`[risubridge] regex sync failed for ${characterId}: ${err instanceof Error ? err.message : String(err)}`));
+}
+async function characterScripts(characterId, userId) {
+  const out = [];
+  for (let offset = 0;; offset += 200) {
+    const page = await spindle.regex_scripts.list({ scope: "character", scopeId: characterId, limit: 200, offset, ...userId ? { userId } : {} });
+    out.push(...page.data);
+    if (page.data.length < 200)
+      break;
+  }
+  return out.filter(isRisuImported);
+}
+async function syncCharacterRegex(characterId, userId, force = false) {
+  const ch = await spindle.characters.get(characterId, userId);
+  const ext = ch?.extensions ?? {};
+  if (!ext.risuai || ext.risubridge?.regex === false)
+    return 0;
+  const styles = backgroundStyles(ext.risuai.backgroundHTML);
+  let fixed = 0;
+  for (const s of await characterScripts(characterId, userId)) {
+    if (!force && alreadySynced(s))
+      continue;
+    if (s.can_mutate === false)
+      continue;
+    const fix = fixFor(s, styles);
+    await spindle.regex_scripts.update(s.id, fix, userId);
+    fixed++;
+  }
+  if (fixed)
+    spindle.log.info(`[risubridge] repaired ${fixed} Risu regex script(s) for ${ch?.name ?? characterId}`);
+  return fixed;
+}
+async function revertCharacterRegex(characterId, userId) {
+  let n = 0;
+  for (const s of await characterScripts(characterId, userId)) {
+    const rev = revertFor(s);
+    if (!rev || s.can_mutate === false)
+      continue;
+    await spindle.regex_scripts.update(s.id, rev, userId);
+    n++;
+  }
+  return n;
+}
+async function regexStatus(characterId, userId) {
+  const all = await characterScripts(characterId, userId);
+  return { total: all.length, synced: all.filter(alreadySynced).length, active: all.filter((s) => alreadySynced(s) && !s.disabled).length };
+}
+async function syncAll() {
+  try {
+    for (let offset = 0;; offset += 100) {
+      const page = await spindle.characters.list({ limit: 100, offset });
+      for (const ch of page.data) {
+        if (ch.extensions?.risuai) {
+          lastSync.set(`:${ch.id}`, Date.now());
+          await syncCharacterRegex(ch.id, undefined).catch(() => 0);
+        }
+      }
+      if (page.data.length < 100)
+        break;
+    }
+  } catch (err) {}
+}
+spindle.on("CHARACTER_CREATED", (payload, userId) => {
+  const p = payload;
+  const id = p?.character?.id ?? p?.characterId ?? p?.id;
+  if (!id)
+    return;
+  setTimeout(() => {
+    lastSync.delete(`${userId ?? ""}:${id}`);
+    scheduleSync(id, userId);
+  }, 5000);
+});
 async function buildTogglesReply(chatId, characterId, userId) {
   const ch = await spindle.characters.get(characterId, userId);
   const risu = ch?.extensions?.risuai;
@@ -819,8 +1004,20 @@ async function buildTogglesReply(chatId, characterId, userId) {
     chatId,
     characterName: ch?.name ?? "",
     isRisu: Boolean(risu),
-    rows: toggleLayout(src, (k) => vars[`toggle_${k}`])
+    rows: toggleLayout(src, (k) => vars[`toggle_${k}`]),
+    regex: risu ? await regexStatus(characterId, userId).catch(() => {
+      return;
+    }) : undefined,
+    regexOptOut: ch?.extensions?.risubridge?.regex === false
   };
+}
+async function setRegexOptOut(characterId, userId, off) {
+  const ch = await spindle.characters.get(characterId, userId);
+  if (!ch)
+    return;
+  const ext = { ...ch.extensions ?? {} };
+  ext.risubridge = { ...ext.risubridge ?? {}, regex: off ? false : true };
+  await spindle.characters.update(characterId, { extensions: ext }, userId);
 }
 spindle.onFrontendMessage(async (payload, userId) => {
   const msg = payload ?? {};
@@ -839,6 +1036,12 @@ spindle.onFrontendMessage(async (payload, userId) => {
       for (const k of Object.keys(vars))
         if (k.startsWith("toggle_"))
           await spindle.variables.chat.delete(chatId, k);
+    } else if (msg.type === "regex_apply") {
+      await setRegexOptOut(characterId, userId, false);
+      await syncCharacterRegex(characterId, userId, true);
+    } else if (msg.type === "regex_revert") {
+      await setRegexOptOut(characterId, userId, true);
+      await revertCharacterRegex(characterId, userId);
     } else if (msg.type !== "get_toggles") {
       return;
     }
@@ -849,3 +1052,6 @@ spindle.onFrontendMessage(async (payload, userId) => {
 });
 spindle.registerMacroInterceptor(intercept, 10);
 spindle.log.info("[risubridge] RisuAI CBS interpreter ready");
+setTimeout(() => {
+  syncAll();
+}, 3000);

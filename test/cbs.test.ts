@@ -110,3 +110,26 @@ describe('toggle panel layout', () => {
     expect(rows[4]).toMatchObject({ value: '0', isDefault: true })
   })
 })
+
+import { fixFor, revertFor, backgroundStyles, alreadySynced } from '../src/regex-sync'
+describe('Risu regex repair', () => {
+  const base = { id: 'x', name: 'n', find_regex: 'a', flags: 'gs', placement: ['ai_output'], target: ['display'], substitute_macros: 'none' }
+  test('turns working scripts on, keeps creator-disabled ones off, maps targets', () => {
+    const d = fixFor({ ...base, replace_string: '<div class="s">$1</div>', disabled: true, metadata: { source: 'risuai_module', original_type: 'editdisplay' } }, '<style>.s{}</style>')
+    expect(d).toMatchObject({ disabled: false, target: 'display', flags: 'g', substitute_macros: 'raw', placement: ['ai_output', 'user_input'] })
+    expect(d.replace_string).toBe('<style>.s{}</style>\n<div class="s">$1</div>')
+    const off = fixFor({ ...base, replace_string: 'x', disabled: false, metadata: { source: 'risuai_module', original_type: 'disabled' } }, '')
+    expect(off.disabled).toBe(true)
+    expect(fixFor({ ...base, replace_string: 'y', disabled: true, metadata: { original_type: 'editprocess' } }, '').target).toBe('prompt')
+    expect(fixFor({ ...base, replace_string: 'y', disabled: true, metadata: { original_type: 'editoutput' } }, '').target).toBe('response')
+  })
+  test('plain-text output gets no stylesheet; revert restores the import', () => {
+    const s = { ...base, replace_string: ']', disabled: true, metadata: { source: 'risuai_module', original_type: 'editdisplay' } }
+    const d = fixFor(s, '<style>x</style>')
+    expect(d.replace_string).toBe(']')
+    const synced = { ...s, ...d, target: [d.target as string] }
+    expect(alreadySynced(synced)).toBe(true)
+    expect(revertFor(synced)).toMatchObject({ replace_string: ']', flags: 'gs', disabled: true, substitute_macros: 'none' })
+    expect(backgroundStyles('<style>a</style><div></div><style>b</style>')).toBe('<style>a</style>\n<style>b</style>')
+  })
+})

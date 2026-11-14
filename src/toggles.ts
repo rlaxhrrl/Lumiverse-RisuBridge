@@ -42,4 +42,6 @@ export interface TogglesReply {
   characterName: string
   isRisu: boolean
   rows: ToggleRow[]
+  regex?: { total: number; synced: number; active: number }
+  regexOptOut?: boolean
 }
