@@ -374,6 +374,42 @@ async function handleClick(chatId: string, characterId: string, userId: string, 
   if (changed || reload) spindle.sendToFrontend({ type: 'risu_reload', chatId }, userId)
 }
 
+/**
+ * Risu "output" triggers: run after the character's reply is saved (Lua `onOutput`, or the
+ * simple variable effects). Used e.g. for stats the model reports at the end of its reply.
+ */
+const outputSeen = new Map<string, number>()
+spindle.on('GENERATION_ENDED', (payload, userId) => {
+  const p = payload as { chatId?: string; messageId?: string; content?: string; error?: string; generationType?: string }
+  if (!p?.chatId || !p.messageId || p.error || p.generationType === 'impersonate' || !userId) return
+  const key = `${p.messageId}:${(p.content ?? '').length}:${(p.content ?? '').slice(-64)}`
+  if (outputSeen.has(key)) return
+  outputSeen.set(key, Date.now())
+  if (outputSeen.size > 500) for (const [k, t] of outputSeen) if (Date.now() - t > 3_600_000) outputSeen.delete(k)
+  void runOutputTriggers(p.chatId, p.messageId, p.content ?? '', userId).catch((err) =>
+    spindle.log.warn(`[risubridge] output trigger failed: ${err instanceof Error ? err.message : String(err)}`))
+})
+
+async function runOutputTriggers(chatId: string, messageId: string, content: string, userId: string) {
+  const chat = await spindle.chats.get(chatId, userId).catch(() => null) as Record<string, any> | null
+  const characterId = chat?.character_id
+  if (!characterId) return
+  const ch = await spindle.characters.get(characterId, userId).catch(() => null)
+  const linked = ((ch?.extensions ?? {}) as Record<string, any>).risubridge?.module as LinkedRisuData | undefined
+  const outputs = ((linked?.triggers ?? []) as RisuTrigger[]).filter((t) => t?.type === 'output')
+  if (!outputs.length) return
+  let reload = false
+  const { host, flush } = await luaHostFor(chatId, characterId, userId, () => { reload = true })
+  if (content) host.charLastMessage = () => content
+  // Conditions are not evaluated yet, so only unconditional simple effects run.
+  for (const t of outputs) if (!(t.conditions ?? []).length) runSimpleTrigger(t, host)
+  const rt = loadLua(outputs, host)
+  if (rt?.hasFunction('onOutput')) await rt.call('onOutput', ['risubridge', messageId])
+  if (rt?.errors.length) spindle.log.warn(`[risubridge] Lua: ${rt.errors.join(' | ').slice(0, 500)}`)
+  const changed = await flush()
+  if (changed || reload) spindle.sendToFrontend({ type: 'risu_reload', chatId }, userId)
+}
+
 /** Risu `listenEdit("editRequest")`: let card Lua edit the outgoing prompt (e.g. random events). */
 spindle.registerInterceptor(async (messages, context) => {
   try {

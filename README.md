@@ -53,6 +53,7 @@ Lumiverse는 카드를 가져올 때 리스의 트리거와 Lua를 버립니다.
 - `risu-btn="..."` → Lua `onButtonClick`, `risu-trigger="이름"` / `{{button::글자::이름}}` → Lua 함수나 수동 트리거
 - Lua: `getChatVar`/`setChatVar`, `getGlobalVar`(토글), `reloadDisplay`, `async` + `:await()`, `alertInput`/`alertNormal`/`alertSelect`, `getUserLastMessage`, `listenEdit("editRequest")`(보내기 전 프롬프트 수정: 루안 랜덤 이벤트 등)
 - 수동 트리거의 변수 설정(`v2SetVar`, `setvar`)
+- 출력(output) 트리거: 캐릭터 답변이 저장된 뒤 Lua `onOutput`과 조건 없는 변수 설정 실행 (답변에 적힌 스탯 반영 등)
 - 원본을 연결하면 정규식 커스텀 플래그(`<move_top>`, `i` 등)도 되살립니다
 - 리스가 붙이는 `x-risu-` 클래스 접두어를 정리해서 선택 버튼 강조 같은 디자인이 그대로 나옵니다
 - 카드 Lua는 파일·네트워크·시스템에 접근할 수 없게 막혀 있습니다

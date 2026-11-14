@@ -15988,6 +15988,50 @@ async function handleClick(chatId, characterId, userId, kind, value) {
   if (changed || reload)
     spindle.sendToFrontend({ type: "risu_reload", chatId }, userId);
 }
+var outputSeen = new Map;
+spindle.on("GENERATION_ENDED", (payload, userId) => {
+  const p = payload;
+  if (!p?.chatId || !p.messageId || p.error || p.generationType === "impersonate" || !userId)
+    return;
+  const key = `${p.messageId}:${(p.content ?? "").length}:${(p.content ?? "").slice(-64)}`;
+  if (outputSeen.has(key))
+    return;
+  outputSeen.set(key, Date.now());
+  if (outputSeen.size > 500) {
+    for (const [k, t] of outputSeen)
+      if (Date.now() - t > 3600000)
+        outputSeen.delete(k);
+  }
+  runOutputTriggers(p.chatId, p.messageId, p.content ?? "", userId).catch((err) => spindle.log.warn(`[risubridge] output trigger failed: ${err instanceof Error ? err.message : String(err)}`));
+});
+async function runOutputTriggers(chatId, messageId, content, userId) {
+  const chat = await spindle.chats.get(chatId, userId).catch(() => null);
+  const characterId = chat?.character_id;
+  if (!characterId)
+    return;
+  const ch = await spindle.characters.get(characterId, userId).catch(() => null);
+  const linked = (ch?.extensions ?? {}).risubridge?.module;
+  const outputs = (linked?.triggers ?? []).filter((t) => t?.type === "output");
+  if (!outputs.length)
+    return;
+  let reload = false;
+  const { host, flush } = await luaHostFor(chatId, characterId, userId, () => {
+    reload = true;
+  });
+  if (content)
+    host.charLastMessage = () => content;
+  for (const t of outputs)
+    if (!(t.conditions ?? []).length)
+      runSimpleTrigger(t, host);
+  const rt = loadLua(outputs, host);
+  if (rt?.hasFunction("onOutput"))
+    await rt.call("onOutput", ["risubridge", messageId]);
+  if (rt?.errors.length)
+    spindle.log.warn(`[risubridge] Lua: ${rt.errors.join(" | ").slice(0, 500)}`);
+  const changed = await flush();
+  if (changed || reload)
+    spindle.sendToFrontend({ type: "risu_reload", chatId }, userId);
+}
 spindle.registerInterceptor(async (messages, context) => {
   try {
     const chat = await spindle.chats.get(context.chatId, context.userId).catch(() => null);
