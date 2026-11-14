@@ -156,7 +156,8 @@ export function fixFor(s: ImportedScript, bgStyles: string, orig?: RisuRegexSour
     // Macro passes are the expensive part of display rendering; only pay for them when
     // the script actually contains macros. Plain scripts then run in the browser worker.
     substitute_macros: MACRO_RE.test(moved ? moved.out : withStyles) || MACRO_RE.test(original.find_regex ?? s.find_regex) ? 'raw' : 'none',
-    disabled: type === 'disabled',
+    // Keep the user's on/off choice once we have synced this script before.
+    disabled: (meta.risubridge as any)?.version ? s.disabled : type === 'disabled',
     metadata: { ...withoutQuarantine(meta), risubridge: { version: SYNC_VERSION, original, linked: Boolean(orig) } },
   }
 }

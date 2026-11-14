@@ -14307,7 +14307,7 @@ ${out}` : out;
     placement,
     target,
     substitute_macros: MACRO_RE.test(moved ? moved.out : withStyles) || MACRO_RE.test(original.find_regex ?? s.find_regex) ? "raw" : "none",
-    disabled: type === "disabled",
+    disabled: meta.risubridge?.version ? s.disabled : type === "disabled",
     metadata: { ...withoutQuarantine(meta), risubridge: { version: SYNC_VERSION, original, linked: Boolean(orig) } }
   };
 }

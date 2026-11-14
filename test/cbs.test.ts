@@ -252,3 +252,12 @@ test('css: @import with ; in the URL is removed whole', () => {
   const css = "<style>\n@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&display=swap');\n.a{color:red}</style>"
   expect(stripImports(css)).toBe('<style>\n.a{color:red}</style>')
 })
+
+import { fixFor } from '../src/regex-sync'
+test('regex resync keeps the user on/off choice', () => {
+  const base = { id: 'r', name: 'x', find_regex: 'a', replace_string: 'b', flags: 'g', placement: ['ai_output'], target: 'display', substitute_macros: 'none', metadata: { source: 'risuai_module', original_type: 'disabled' } } as any
+  const first = fixFor({ ...base, disabled: false }, '')
+  expect(first.disabled).toBe(true)
+  const userOn = { ...base, ...first, disabled: false, metadata: { ...first.metadata, risubridge: { ...(first.metadata as any).risubridge, version: 1 } } }
+  expect(fixFor(userOn, '').disabled).toBe(false)
+})
