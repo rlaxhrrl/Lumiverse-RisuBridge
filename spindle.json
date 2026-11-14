@@ -1,5 +1,5 @@
 {
-  "version": "0.6.0",
+  "version": "0.6.1",
   "name": "Risu Bridge",
   "identifier": "risubridge",
   "author": "rlaxhrrl",
@@ -14,7 +14,8 @@
     "regex_scripts",
     "regex_scripts_unrestricted",
     "interceptor",
-    "world_books"
+    "world_books",
+    "generation"
   ],
   "entry_backend": "dist/backend.js",
   "entry_frontend": "dist/frontend.js",

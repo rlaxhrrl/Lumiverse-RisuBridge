@@ -63,7 +63,7 @@ Lumiverse는 카드를 가져올 때 리스의 트리거와 Lua를 버립니다.
 ## 설치
 
 Lumiverse → Extensions → Install from GitHub → 이 저장소 주소.
-권한 `macro_interceptor`, `characters`, `chats`, `chat_mutation`(메시지 읽기), `regex_scripts`, `regex_scripts_unrestricted`, `interceptor`(editRequest), `world_books`(로어북)를 허용해 주세요.
+권한 `macro_interceptor`, `characters`, `chats`, `chat_mutation`(메시지 읽기), `regex_scripts`, `regex_scripts_unrestricted`, `interceptor`(editRequest), `world_books`(로어북), `generation`(답변이 끝난 걸 알기 위해, 답변 후 트리거용)을 허용해 주세요.
 0.5.0으로 업데이트하면 `world_books` 권한을 한 번 더 허용해야 로어북 맞춤이 작동합니다.
 
 ## 개발
