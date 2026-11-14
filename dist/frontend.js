@@ -1088,6 +1088,19 @@ function setup(ctx) {
   fixedObserver.observe(document.body, { childList: true, subtree: true });
   document.addEventListener("click", scheduleRelease, true);
   scheduleRelease();
+  function measureInputBar() {
+    let inset = 0;
+    const ta = document.querySelector("textarea");
+    for (let el = ta;el && el !== document.body; el = el.parentElement) {
+      const r = el.getBoundingClientRect();
+      if (r.bottom >= window.innerHeight - 8 && r.height < window.innerHeight / 2)
+        inset = Math.max(inset, window.innerHeight - r.top);
+    }
+    document.documentElement.style.setProperty("--risu-safe-bottom", `${Math.round(inset)}px`);
+  }
+  const insetTimer = setInterval(measureInputBar, 1500);
+  window.addEventListener("resize", measureInputBar);
+  measureInputBar();
   const offClick = action.onClick(open);
   const offMsg = ctx.onBackendMessage((payload) => {
     const msg = payload;
@@ -1114,6 +1127,8 @@ function setup(ctx) {
     document.removeEventListener("drop", onDrop, true);
     document.removeEventListener("click", scheduleRelease, true);
     fixedObserver.disconnect();
+    clearInterval(insetTimer);
+    window.removeEventListener("resize", measureInputBar);
     if (fixedTimer)
       clearTimeout(fixedTimer);
     action.destroy();

@@ -339,6 +339,21 @@ export function setup(ctx: SpindleFrontendContext) {
   document.addEventListener('click', scheduleRelease, true)
   scheduleRelease()
 
+  // Expose the space the chat input bar takes at the bottom as --risu-safe-bottom, so
+  // full-height Risu panels can stop above it (custom properties reach into islands).
+  function measureInputBar() {
+    let inset = 0
+    const ta = document.querySelector<HTMLTextAreaElement>('textarea')
+    for (let el: HTMLElement | null = ta; el && el !== document.body; el = el.parentElement) {
+      const r = el.getBoundingClientRect()
+      if (r.bottom >= window.innerHeight - 8 && r.height < window.innerHeight / 2) inset = Math.max(inset, window.innerHeight - r.top)
+    }
+    document.documentElement.style.setProperty('--risu-safe-bottom', `${Math.round(inset)}px`)
+  }
+  const insetTimer = setInterval(measureInputBar, 1500)
+  window.addEventListener('resize', measureInputBar)
+  measureInputBar()
+
   const offClick = action.onClick(open)
   const offMsg = ctx.onBackendMessage((payload) => {
     const msg = payload as { type?: string; error?: string }
@@ -357,6 +372,8 @@ export function setup(ctx: SpindleFrontendContext) {
     document.removeEventListener('drop', onDrop, true)
     document.removeEventListener('click', scheduleRelease, true)
     fixedObserver.disconnect()
+    clearInterval(insetTimer)
+    window.removeEventListener('resize', measureInputBar)
     if (fixedTimer) clearTimeout(fixedTimer)
     action.destroy()
     modal?.dismiss()

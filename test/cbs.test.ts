@@ -261,3 +261,9 @@ test('regex resync keeps the user on/off choice', () => {
   const userOn = { ...base, ...first, disabled: false, metadata: { ...first.metadata, risubridge: { ...(first.metadata as any).risubridge, version: 1 } } }
   expect(fixFor(userOn, '').disabled).toBe(false)
 })
+
+import { keepAboveInput } from '../src/regex-sync'
+test('css: full-height panels stop above the input bar', () => {
+  expect(keepAboveInput('max-height:calc(100dvh - 40px);height:100vh;width:100vw'))
+    .toBe('max-height:calc(calc(100dvh - var(--risu-safe-bottom, 0px)) - 40px);height:calc(100vh - var(--risu-safe-bottom, 0px));width:100vw')
+})

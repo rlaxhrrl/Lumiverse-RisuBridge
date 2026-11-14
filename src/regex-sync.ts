@@ -24,7 +24,7 @@ export interface ImportedScript {
 
 import type { RisuRegexSource } from './risu-file'
 
-export const SYNC_VERSION = 6
+export const SYNC_VERSION = 7
 
 /** Number of capturing groups in a JS regex source. */
 export function countGroups(src: string): number {
@@ -126,7 +126,7 @@ export function fixFor(s: ImportedScript, bgStyles: string, orig?: RisuRegexSour
   // write the prefix by hand. Drop it everywhere so HTML and CSS keep matching here.
   // Lumiverse's HTML sanitizer cuts `@import url(...)` at the first `;` inside the URL
   // (Google Fonts links have one), and the leftover swallows the next CSS rule.
-  const unprefix = (t: string) => stripImports(t.replace(/x-risu-/g, ''))
+  const unprefix = (t: string) => keepAboveInput(stripImports(t.replace(/x-risu-/g, '')))
   const out = unprefix(original.replace_string as string)
   bgStyles = unprefix(bgStyles)
 
@@ -160,6 +160,14 @@ export function fixFor(s: ImportedScript, bgStyles: string, orig?: RisuRegexSour
     disabled: (meta.risubridge as any)?.version ? s.disabled : type === 'disabled',
     metadata: { ...withoutQuarantine(meta), risubridge: { version: SYNC_VERSION, original, linked: Boolean(orig) } },
   }
+}
+
+/**
+ * Full-screen Risu panels size themselves with 100vh; in Lumiverse the chat input bar sits
+ * on top of that area. Subtract the bar height the frontend publishes as --risu-safe-bottom.
+ */
+export function keepAboveInput(t: string): string {
+  return t.replace(/(?<![\w.-])100(d|s|l)?vh\b/g, (_m, u) => `calc(100${u ?? ''}vh - var(--risu-safe-bottom, 0px))`)
 }
 
 /** Remove CSS `@import` statements (they are not loaded in Lumiverse and break the next rule). */

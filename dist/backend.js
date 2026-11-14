@@ -14190,7 +14190,7 @@ function toggleLayout(src, current) {
 }
 
 // src/regex-sync.ts
-var SYNC_VERSION = 6;
+var SYNC_VERSION = 7;
 function countGroups(src) {
   let n = 0;
   let inClass = false;
@@ -14277,7 +14277,7 @@ function fixFor(s, bgStyles, orig, charName) {
     find_regex: s.find_regex,
     folder: s.folder ?? ""
   };
-  const unprefix = (t) => stripImports(t.replace(/x-risu-/g, ""));
+  const unprefix = (t) => keepAboveInput(stripImports(t.replace(/x-risu-/g, "")));
   const out = unprefix(original.replace_string);
   bgStyles = unprefix(bgStyles);
   let target = "display";
@@ -14310,6 +14310,9 @@ ${out}` : out;
     disabled: meta.risubridge?.version ? s.disabled : type === "disabled",
     metadata: { ...withoutQuarantine(meta), risubridge: { version: SYNC_VERSION, original, linked: Boolean(orig) } }
   };
+}
+function keepAboveInput(t) {
+  return t.replace(/(?<![\w.-])100(d|s|l)?vh\b/g, (_m, u) => `calc(100${u ?? ""}vh - var(--risu-safe-bottom, 0px))`);
 }
 function stripImports(t) {
   return t.replace(/@import\s+(?:url\(\s*(?:'[^']*'|"[^"]*"|[^)]*)\s*\)|'[^']*'|"[^"]*")[^;{}]*;[ \t]*\n?/gi, "");
