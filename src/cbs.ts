@@ -541,8 +541,9 @@ function evalMacro(innerRaw: string, st: State): string {
     case 'button': {
       const label = a[0] ?? ''
       const trig = (a[1] ?? '').replace(/"/g, '&quot;')
-      // Risu draws these as small pill buttons; give them a visible default look.
-      return `<button class="risu-btn" data-risu-trigger="${trig}" style="display:inline-block;margin:2px 4px 2px 0;padding:4px 12px;border-radius:999px;border:1px solid currentColor;background:transparent;color:inherit;font:inherit;font-size:0.9em;cursor:pointer;opacity:.9">${label}</button>`
+      // Same markup as Risu (`button-default`) so the card's own CSS can restyle or hide it.
+      // The fallback pill look uses :where() (zero specificity) so any card rule wins.
+      return `<style>:where(button.risu-btn){display:inline-block;margin:2px 4px 2px 0;padding:4px 12px;border-radius:999px;border:1px solid currentColor;background:transparent;color:inherit;font:inherit;font-size:.9em;cursor:pointer}</style><button class="button-default risu-btn" risu-trigger="${trig}" data-risu-trigger="${trig}">${label}</button>`
     }
 
     default:
