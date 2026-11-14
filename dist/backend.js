@@ -15875,8 +15875,23 @@ async function buildTogglesReply(chatId, characterId, userId) {
       return;
     }) : undefined,
     regexOptOut: ch?.extensions?.risubridge?.regex === false,
-    linked: linkedInfo(ch?.extensions?.risubridge?.module)
+    linked: linkedInfo(ch?.extensions?.risubridge?.module),
+    usesButtons: risu ? await usesButtons(ch, characterId, userId).catch(() => true) : false
   };
+}
+var BUTTON_RE = /risu-btn|risu-trigger|\{\{\s*button::/i;
+async function usesButtons(ch, characterId, userId) {
+  if (!ch)
+    return false;
+  const text = [ch.first_mes, ch.description, ch.personality, ch.scenario, ...ch.alternate_greetings ?? []].join(`
+`);
+  if (BUTTON_RE.test(text))
+    return true;
+  const ext = ch.extensions ?? {};
+  if (BUTTON_RE.test(String(ext.risuai?.backgroundHTML ?? "")))
+    return true;
+  const scripts = await characterScripts(characterId, userId);
+  return scripts.some((s) => BUTTON_RE.test(s.replace_string) || BUTTON_RE.test(String((s.metadata ?? {}).risubridge?.original?.replace_string ?? "")));
 }
 function linkedInfo(mod) {
   if (!mod)

@@ -284,7 +284,21 @@ async function buildTogglesReply(chatId: string, characterId: string, userId: st
     regex: risu ? await regexStatus(characterId, userId).catch(() => undefined) : undefined,
     regexOptOut: (ch?.extensions as Record<string, any> | undefined)?.risubridge?.regex === false,
     linked: linkedInfo((ch?.extensions as Record<string, any> | undefined)?.risubridge?.module),
+    usesButtons: risu ? await usesButtons(ch, characterId, userId).catch(() => true) : false,
   }
+}
+
+const BUTTON_RE = /risu-btn|risu-trigger|\{\{\s*button::/i
+
+/** Whether the card shows Risu buttons anywhere (greetings, description, regex output). */
+async function usesButtons(ch: Awaited<ReturnType<SpindleAPI['characters']['get']>>, characterId: string, userId: string): Promise<boolean> {
+  if (!ch) return false
+  const text = [ch.first_mes, ch.description, ch.personality, ch.scenario, ...(ch.alternate_greetings ?? [])].join('\n')
+  if (BUTTON_RE.test(text)) return true
+  const ext = (ch.extensions ?? {}) as Record<string, any>
+  if (BUTTON_RE.test(String(ext.risuai?.backgroundHTML ?? ''))) return true
+  const scripts = await characterScripts(characterId, userId)
+  return scripts.some((s) => BUTTON_RE.test(s.replace_string) || BUTTON_RE.test(String(((s.metadata ?? {}) as any).risubridge?.original?.replace_string ?? '')))
 }
 
 function linkedInfo(mod: LinkedRisuData | undefined) {

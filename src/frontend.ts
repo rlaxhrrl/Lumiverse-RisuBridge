@@ -147,7 +147,7 @@ export function setup(ctx: SpindleFrontendContext) {
       box.append(title, line)
       body.append(box)
     }
-    if (reply.isRisu) body.append(linkBox(reply))
+    if (reply.isRisu && (reply.linked || reply.usesButtons)) body.append(linkBox(reply))
     if (!settable.length && !(reply.regex && reply.regex.total > 0)) return
     const foot = document.createElement('div')
     foot.className = 'rb-foot'

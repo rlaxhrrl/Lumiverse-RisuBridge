@@ -880,7 +880,7 @@ function setup(ctx) {
       box.append(title, line);
       body.append(box);
     }
-    if (reply.isRisu)
+    if (reply.isRisu && (reply.linked || reply.usesButtons))
       body.append(linkBox(reply));
     if (!settable.length && !(reply.regex && reply.regex.total > 0))
       return;

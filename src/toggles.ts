@@ -45,4 +45,6 @@ export interface TogglesReply {
   regex?: { total: number; synced: number; active: number }
   regexOptOut?: boolean
   linked?: { cardName: string; linkedAt: number; lua: boolean; manual: number }
+  /** The card shows Risu buttons, so linking its original file is useful. */
+  usesButtons?: boolean
 }
