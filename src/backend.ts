@@ -185,7 +185,7 @@ async function syncCharacterRegex(characterId: string, userId: string | undefine
   for (const s of await characterScripts(characterId, userId)) {
     if (!force && alreadySynced(s, Boolean(linked))) continue
     if (s.can_mutate === false) continue
-    const fix = fixFor(s, styles, matchOriginal(s, linked?.regex))
+    const fix = fixFor(s, styles, matchOriginal(s, linked?.regex), ch?.name)
     await spindle.regex_scripts.update(s.id, fix as never, userId)
     fixed++
   }

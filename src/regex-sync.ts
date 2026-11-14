@@ -19,11 +19,12 @@ export interface ImportedScript {
   disabled: boolean
   metadata?: Record<string, unknown> | null
   can_mutate?: boolean
+  folder?: string
 }
 
 import type { RisuRegexSource } from './risu-file'
 
-export const SYNC_VERSION = 4
+export const SYNC_VERSION = 5
 
 /** Number of capturing groups in a JS regex source. */
 export function countGroups(src: string): number {
@@ -66,6 +67,7 @@ export function risuFlags(orig: RisuRegexSource | undefined): { flags: string; m
 }
 
 export interface ScriptFix {
+  folder?: string
   find_regex?: string
   replace_string: string
   flags: string
@@ -104,7 +106,10 @@ export function matchOriginal(s: ImportedScript, originals: RisuRegexSource[] | 
 }
 
 /** Compute the Risu-faithful settings for one imported script. */
-export function fixFor(s: ImportedScript, bgStyles: string, orig?: RisuRegexSource): ScriptFix {
+/** Folder name the Regex Scripts panel groups a card's scripts under. */
+export const folderName = (charName: string) => `리스 · ${charName}`.slice(0, 120)
+
+export function fixFor(s: ImportedScript, bgStyles: string, orig?: RisuRegexSource, charName?: string): ScriptFix {
   const meta = { ...((s.metadata ?? {}) as Record<string, unknown>) }
   const type = String(meta.original_type ?? 'editdisplay')
   const original = (meta.risubridge as any)?.original ?? {
@@ -115,6 +120,7 @@ export function fixFor(s: ImportedScript, bgStyles: string, orig?: RisuRegexSour
     substitute_macros: s.substitute_macros,
     disabled: s.disabled,
     find_regex: s.find_regex,
+    folder: s.folder ?? '',
   }
   // Risu prefixes every class/id with `x-risu-` in both HTML and CSS; creators sometimes
   // write the prefix by hand. Drop it everywhere so HTML and CSS keep matching here.
@@ -135,7 +141,11 @@ export function fixFor(s: ImportedScript, bgStyles: string, orig?: RisuRegexSour
   const f = risuFlags(orig)
   const moved = f.moveTop ? moveTop(original.find_regex ?? s.find_regex, withStyles) : null
 
+  // Group the card's scripts in one folder, unless the user already filed them somewhere.
+  const currentFolder = (s.folder ?? '').trim()
+  const folder = charName && (!currentFolder || currentFolder === folderName(charName)) ? folderName(charName) : undefined
   return {
+    ...(folder ? { folder } : {}),
     ...(moved ? { find_regex: moved.find } : original.find_regex && original.find_regex !== s.find_regex ? { find_regex: original.find_regex } : {}),
     replace_string: moved ? moved.out : withStyles,
     flags: f.flags,
@@ -164,6 +174,7 @@ export function revertFor(s: ImportedScript): Partial<ScriptFix> | null {
   if (!original) return null
   delete meta.risubridge
   return {
+    ...(typeof original.folder === 'string' ? { folder: original.folder } : {}),
     ...(original.find_regex ? { find_regex: original.find_regex } : {}),
     replace_string: original.replace_string,
     flags: original.flags,

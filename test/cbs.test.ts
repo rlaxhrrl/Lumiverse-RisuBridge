@@ -190,3 +190,11 @@ test('scripts with macros keep the macro pass', () => {
   const d = fixFor({ id: 'x', name: 'n', find_regex: 'a', flags: 'g', placement: [], target: ['display'], substitute_macros: 'none', disabled: true, replace_string: '{{getvar::x}}$1', metadata: { original_type: 'editdisplay' } }, '')
   expect(d.substitute_macros).toBe('raw')
 })
+
+test('a card\'s scripts are grouped in one folder (and ungrouped on revert)', () => {
+  const s = { id: 'x', name: 'n', find_regex: 'a', flags: 'gs', placement: [], target: ['display'], substitute_macros: 'none', disabled: true, replace_string: 'y', folder: '', metadata: { original_type: 'editdisplay' } }
+  const d = fixFor(s, '', undefined, 'ALTAIS')
+  expect(d.folder).toBe('리스 · ALTAIS')
+  expect(revertFor({ ...s, ...d, target: ['display'] })?.folder).toBe('')
+  expect(fixFor({ ...s, folder: '내 폴더' }, '', undefined, 'ALTAIS').folder).toBeUndefined()
+})

@@ -14190,7 +14190,7 @@ function toggleLayout(src, current) {
 }
 
 // src/regex-sync.ts
-var SYNC_VERSION = 4;
+var SYNC_VERSION = 5;
 function countGroups(src) {
   let n = 0;
   let inClass = false;
@@ -14263,7 +14263,8 @@ function matchOriginal(s, originals) {
   const find = meta.risubridge?.original?.find_regex ?? s.find_regex;
   return originals.find((o) => o.in === find && (o.comment ?? "") === s.name.replace(/^Imported RisuAI Script \d+$/, "")) ?? originals.find((o) => o.in === find);
 }
-function fixFor(s, bgStyles, orig) {
+var folderName = (charName) => `\uB9AC\uC2A4 \xB7 ${charName}`.slice(0, 120);
+function fixFor(s, bgStyles, orig, charName) {
   const meta = { ...s.metadata ?? {} };
   const type = String(meta.original_type ?? "editdisplay");
   const original = meta.risubridge?.original ?? {
@@ -14273,7 +14274,8 @@ function fixFor(s, bgStyles, orig) {
     target: s.target,
     substitute_macros: s.substitute_macros,
     disabled: s.disabled,
-    find_regex: s.find_regex
+    find_regex: s.find_regex,
+    folder: s.folder ?? ""
   };
   const unprefix = (t) => t.replace(/x-risu-/g, "");
   const out = unprefix(original.replace_string);
@@ -14295,7 +14297,10 @@ function fixFor(s, bgStyles, orig) {
 ${out}` : out;
   const f = risuFlags(orig);
   const moved = f.moveTop ? moveTop(original.find_regex ?? s.find_regex, withStyles) : null;
+  const currentFolder = (s.folder ?? "").trim();
+  const folder = charName && (!currentFolder || currentFolder === folderName(charName)) ? folderName(charName) : undefined;
   return {
+    ...folder ? { folder } : {},
     ...moved ? { find_regex: moved.find } : original.find_regex && original.find_regex !== s.find_regex ? { find_regex: original.find_regex } : {},
     replace_string: moved ? moved.out : withStyles,
     flags: f.flags,
@@ -14320,6 +14325,7 @@ function revertFor(s) {
     return null;
   delete meta.risubridge;
   return {
+    ...typeof original.folder === "string" ? { folder: original.folder } : {},
     ...original.find_regex ? { find_regex: original.find_regex } : {},
     replace_string: original.replace_string,
     flags: original.flags,
@@ -15624,7 +15630,7 @@ async function syncCharacterRegex(characterId, userId, force = false) {
       continue;
     if (s.can_mutate === false)
       continue;
-    const fix = fixFor(s, styles, matchOriginal(s, linked?.regex));
+    const fix = fixFor(s, styles, matchOriginal(s, linked?.regex), ch?.name);
     await spindle.regex_scripts.update(s.id, fix, userId);
     fixed++;
   }
