@@ -24,7 +24,7 @@ export interface ImportedScript {
 
 import type { RisuRegexSource } from './risu-file'
 
-export const SYNC_VERSION = 5
+export const SYNC_VERSION = 6
 
 /** Number of capturing groups in a JS regex source. */
 export function countGroups(src: string): number {
@@ -124,7 +124,9 @@ export function fixFor(s: ImportedScript, bgStyles: string, orig?: RisuRegexSour
   }
   // Risu prefixes every class/id with `x-risu-` in both HTML and CSS; creators sometimes
   // write the prefix by hand. Drop it everywhere so HTML and CSS keep matching here.
-  const unprefix = (t: string) => t.replace(/x-risu-/g, '')
+  // Lumiverse's HTML sanitizer cuts `@import url(...)` at the first `;` inside the URL
+  // (Google Fonts links have one), and the leftover swallows the next CSS rule.
+  const unprefix = (t: string) => stripImports(t.replace(/x-risu-/g, ''))
   const out = unprefix(original.replace_string as string)
   bgStyles = unprefix(bgStyles)
 
@@ -157,6 +159,11 @@ export function fixFor(s: ImportedScript, bgStyles: string, orig?: RisuRegexSour
     disabled: type === 'disabled',
     metadata: { ...withoutQuarantine(meta), risubridge: { version: SYNC_VERSION, original, linked: Boolean(orig) } },
   }
+}
+
+/** Remove CSS `@import` statements (they are not loaded in Lumiverse and break the next rule). */
+export function stripImports(t: string): string {
+  return t.replace(/@import\s+(?:url\(\s*(?:'[^']*'|"[^"]*"|[^)]*)\s*\)|'[^']*'|"[^"]*")[^;{}]*;[ \t]*\n?/gi, '')
 }
 
 /** A repaired script gets a fresh start: drop a quarantine earned by its old, heavier form. */

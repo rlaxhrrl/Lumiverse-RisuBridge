@@ -246,3 +246,9 @@ test('lore: keys and role decorators', () => {
   expect(fix.keysecondary).toEqual(['x'])
   expect(fix.selective_logic).toBe(1)
 })
+
+import { stripImports } from '../src/regex-sync'
+test('css: @import with ; in the URL is removed whole', () => {
+  const css = "<style>\n@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&display=swap');\n.a{color:red}</style>"
+  expect(stripImports(css)).toBe('<style>\n.a{color:red}</style>')
+})

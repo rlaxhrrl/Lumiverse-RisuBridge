@@ -14190,7 +14190,7 @@ function toggleLayout(src, current) {
 }
 
 // src/regex-sync.ts
-var SYNC_VERSION = 5;
+var SYNC_VERSION = 6;
 function countGroups(src) {
   let n = 0;
   let inClass = false;
@@ -14277,7 +14277,7 @@ function fixFor(s, bgStyles, orig, charName) {
     find_regex: s.find_regex,
     folder: s.folder ?? ""
   };
-  const unprefix = (t) => t.replace(/x-risu-/g, "");
+  const unprefix = (t) => stripImports(t.replace(/x-risu-/g, ""));
   const out = unprefix(original.replace_string);
   bgStyles = unprefix(bgStyles);
   let target = "display";
@@ -14310,6 +14310,9 @@ ${out}` : out;
     disabled: type === "disabled",
     metadata: { ...withoutQuarantine(meta), risubridge: { version: SYNC_VERSION, original, linked: Boolean(orig) } }
   };
+}
+function stripImports(t) {
+  return t.replace(/@import\s+(?:url\(\s*(?:'[^']*'|"[^"]*"|[^)]*)\s*\)|'[^']*'|"[^"]*")[^;{}]*;[ \t]*\n?/gi, "");
 }
 function withoutQuarantine(meta) {
   const ev = meta.regex_evidence;
