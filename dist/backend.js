@@ -15329,7 +15329,7 @@ function evalMacro(innerRaw, st) {
     case "button": {
       const label = a[0] ?? "";
       const trig = (a[1] ?? "").replace(/"/g, "&quot;");
-      return `<button class="risu-btn" data-risu-trigger="${trig}">${label}</button>`;
+      return `<button class="risu-btn" data-risu-trigger="${trig}" style="display:inline-block;margin:2px 4px 2px 0;padding:4px 12px;border-radius:999px;border:1px solid currentColor;background:transparent;color:inherit;font:inherit;font-size:0.9em;cursor:pointer;opacity:.9">${label}</button>`;
     }
     default:
       return passthrough();
@@ -15740,8 +15740,72 @@ async function setRegexOptOut(characterId, userId, off) {
   ext.risubridge = { ...ext.risubridge ?? {}, regex: off ? false : true };
   await spindle.characters.update(characterId, { extensions: ext }, userId);
 }
+async function saveLink(characterId, userId, data) {
+  const ch = await spindle.characters.get(characterId, userId);
+  if (!ch)
+    return false;
+  const ext = { ...ch.extensions ?? {} };
+  const slim = {
+    triggers: Array.isArray(data.triggers) ? data.triggers : [],
+    regex: (Array.isArray(data.regex) ? data.regex : []).map((r) => ({ comment: r.comment, in: r.in, type: r.type, flag: r.flag, ableFlag: r.ableFlag })),
+    lowLevelAccess: Boolean(data.lowLevelAccess),
+    cardName: String(data.cardName ?? ""),
+    linkedAt: Date.now()
+  };
+  ext.risubridge = { ...ext.risubridge ?? {}, module: slim };
+  await spindle.characters.update(characterId, { extensions: ext }, userId);
+  cardCache.clear();
+  if (ext.risubridge.regex !== false)
+    await syncCharacterRegex(characterId, userId, true);
+  return true;
+}
+var pendingLinks = new Map;
+var PENDING_MS = 5 * 60000;
+async function tryPendingLinks(userId) {
+  const mine = [...pendingLinks.entries()].filter(([k, v]) => k.startsWith(`${userId}:`) && Date.now() - v.at < PENDING_MS);
+  for (const [k, v] of pendingLinks)
+    if (Date.now() - v.at >= PENDING_MS)
+      pendingLinks.delete(k);
+  if (!mine.length)
+    return;
+  const names = new Map(mine.map(([k, v]) => [v.data.cardName, k]));
+  for (let offset = 0;offset < 2000 && names.size; offset += 100) {
+    const page = await spindle.characters.list({ limit: 100, offset, userId }).catch(() => null);
+    if (!page)
+      return;
+    for (const ch of page.data) {
+      const key = names.get(ch.name);
+      if (!key)
+        continue;
+      const ext = ch.extensions ?? {};
+      if (!ext.risuai || ext.risubridge?.module)
+        continue;
+      const entry = pendingLinks.get(key);
+      if (!entry)
+        continue;
+      if (await saveLink(ch.id, userId, entry.data).catch(() => false)) {
+        spindle.log.info(`[risubridge] linked original file automatically for ${ch.name}`);
+        pendingLinks.delete(key);
+        names.delete(ch.name);
+      }
+    }
+    if (page.data.length < 100)
+      break;
+  }
+}
 spindle.onFrontendMessage(async (payload, userId) => {
   const msg = payload ?? {};
+  if (msg.type === "pending_link" && msg.data && typeof msg.data === "object") {
+    const data = msg.data;
+    if (!data.cardName)
+      return;
+    pendingLinks.set(`${userId}:${data.cardName}`, { data, at: Date.now() });
+    for (const delay of [3000, 1e4, 30000, 90000])
+      setTimeout(() => {
+        tryPendingLinks(userId);
+      }, delay);
+    return;
+  }
   if (msg.type === "risu_prompt_reply" && typeof msg.id === "string") {
     const resolve = pendingPrompts.get(msg.id);
     pendingPrompts.delete(msg.id);
@@ -15761,23 +15825,7 @@ spindle.onFrontendMessage(async (payload, userId) => {
       return;
     }
     if (msg.type === "link_original" && msg.data && typeof msg.data === "object") {
-      const data = msg.data;
-      const ch = await spindle.characters.get(characterId, userId);
-      if (ch) {
-        const ext = { ...ch.extensions ?? {} };
-        const slim = {
-          triggers: Array.isArray(data.triggers) ? data.triggers : [],
-          regex: (Array.isArray(data.regex) ? data.regex : []).map((r) => ({ comment: r.comment, in: r.in, type: r.type, flag: r.flag, ableFlag: r.ableFlag })),
-          lowLevelAccess: Boolean(data.lowLevelAccess),
-          cardName: String(data.cardName ?? ""),
-          linkedAt: Date.now()
-        };
-        ext.risubridge = { ...ext.risubridge ?? {}, module: slim };
-        await spindle.characters.update(characterId, { extensions: ext }, userId);
-        cardCache.clear();
-        if (ext.risubridge.regex !== false)
-          await syncCharacterRegex(characterId, userId, true);
-      }
+      await saveLink(characterId, userId, msg.data);
     } else if (msg.type === "set_toggle" && typeof msg.key === "string" && typeof msg.value === "string") {
       await spindle.variables.chat.set(chatId, `toggle_${msg.key}`, msg.value);
     } else if (msg.type === "reset_toggles") {

@@ -35,9 +35,10 @@ Lumiverse는 리스 카드의 정규식을 가져올 때 켜짐/꺼짐을 거꾸
 
 ## 버튼과 Lua (4단계)
 
-Lumiverse는 카드를 가져올 때 리스의 트리거와 Lua를 버립니다. 그래서 **원본 카드 파일을 한 번 연결**해야 합니다.
-⋯ → 리스 토글 → "버튼·Lua" 칸의 **원본 파일 연결**에서 처음 가져왔던 .charx / .png / .jpeg를 고르면 됩니다
-(파일은 브라우저에서 읽고, 트리거와 정규식 설정만 캐릭터에 저장해요).
+Lumiverse는 카드를 가져올 때 리스의 트리거와 Lua를 버립니다. 이 확장은 **카드를 가져오는 순간 원본 파일에서 그 부분을 따로 읽어 자동으로 연결**합니다
+(Lumiverse의 캐릭터 가져오기에서 파일을 고르거나 끌어다 놓을 때. 파일은 브라우저에서 읽고, 트리거와 정규식 설정만 캐릭터에 저장해요).
+
+확장을 켜기 **전에** 가져온 카드나 URL로 가져온 카드는 ⋯ → 리스 토글 → "카드 속 버튼"의 **원본 파일 연결**에서 원본 파일을 한 번 골라 주세요.
 
 - `risu-btn="..."` → Lua `onButtonClick`, `risu-trigger="이름"` / `{{button::글자::이름}}` → Lua 함수나 수동 트리거
 - Lua: `getChatVar`/`setChatVar`, `getGlobalVar`(토글), `reloadDisplay`, `async` + `:await()`, `alertInput`/`alertNormal`/`alertSelect`, `getUserLastMessage`, `listenEdit("editRequest")`(보내기 전 프롬프트 수정: 루안 랜덤 이벤트 등)

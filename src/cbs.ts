@@ -541,7 +541,8 @@ function evalMacro(innerRaw: string, st: State): string {
     case 'button': {
       const label = a[0] ?? ''
       const trig = (a[1] ?? '').replace(/"/g, '&quot;')
-      return `<button class="risu-btn" data-risu-trigger="${trig}">${label}</button>`
+      // Risu draws these as small pill buttons; give them a visible default look.
+      return `<button class="risu-btn" data-risu-trigger="${trig}" style="display:inline-block;margin:2px 4px 2px 0;padding:4px 12px;border-radius:999px;border:1px solid currentColor;background:transparent;color:inherit;font:inherit;font-size:0.9em;cursor:pointer;opacity:.9">${label}</button>`
     }
 
     default:

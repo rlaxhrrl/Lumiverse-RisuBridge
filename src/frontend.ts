@@ -128,7 +128,7 @@ export function setup(ctx: SpindleFrontendContext) {
       const title = document.createElement('div')
       title.className = 'rb-group'
       title.style.marginTop = '0'
-      title.textContent = '리스 정규식 (상태창·화면 꾸미기)'
+      title.textContent = '상태창·화면 꾸미기'
       const line = document.createElement('div')
       line.className = 'rb-regex-row'
       const info = document.createElement('span')
@@ -139,7 +139,7 @@ export function setup(ctx: SpindleFrontendContext) {
         btn.textContent = '리스처럼 적용'
         btn.addEventListener('click', () => { btn.disabled = true; send({ type: 'regex_apply', chatId: currentChat }) })
       } else {
-        info.textContent = `${reply.regex.total}개 중 ${reply.regex.active}개 켜짐 (제작자가 꺼둔 건 꺼진 채로)`
+        info.textContent = `정상 작동 중 (${reply.regex.active}/${reply.regex.total}개 켜짐, 제작자가 꺼둔 건 꺼둠)`
         btn.textContent = '원래대로'
         btn.addEventListener('click', () => { btn.disabled = true; send({ type: 'regex_revert', chatId: currentChat }) })
       }
@@ -169,14 +169,14 @@ export function setup(ctx: SpindleFrontendContext) {
     const title = document.createElement('div')
     title.className = 'rb-group'
     title.style.marginTop = '0'
-    title.textContent = '버튼·Lua (원본 카드 파일)'
+    title.textContent = '카드 속 버튼'
     const line = document.createElement('div')
     line.className = 'rb-regex-row'
     const info = document.createElement('span')
     const l = reply.linked
     info.textContent = l
       ? `연결됨${l.lua ? ' · Lua 있음' : ''}${l.manual ? ` · 버튼 트리거 ${l.manual}개` : ''}`
-      : 'Lumiverse가 가져올 때 버튼 동작(Lua·트리거)을 버려요. 원본 파일을 한 번 연결해 주세요.'
+      : '이 카드의 버튼을 쓰려면 처음 가져왔던 원본 카드 파일을 한 번 골라 주세요. (확장을 켠 뒤에 가져온 카드는 자동으로 연결돼요)'
     const btn = document.createElement('button')
     btn.className = 'rb-btn'
     btn.textContent = l ? '다시 연결' : '원본 파일 연결'
@@ -283,6 +283,31 @@ export function setup(ctx: SpindleFrontendContext) {
     try { (ctx as unknown as { display?: { invalidate(v: string[]): void } }).display?.invalidate(['*']) } catch { /* older host */ }
   }
 
+  // ── Remember Risu card files picked anywhere in Lumiverse (e.g. character import) ──
+  // so buttons and Lua work without linking the file again by hand.
+  const CARD_EXT = /\.(charx|png|jpe?g|risum)$/i
+  async function inspectFiles(files: Iterable<File>) {
+    for (const file of files) {
+      if (!CARD_EXT.test(file.name) || file.size > 200 * 1024 * 1024) continue
+      try {
+        const data = readRisuFile(new Uint8Array(await file.arrayBuffer()))
+        if ('error' in data || !data.cardName) continue
+        if (!data.triggers.length && !data.regex.some((r) => r.ableFlag && r.flag)) continue
+        send({ type: 'pending_link', data })
+      } catch { /* not a card */ }
+    }
+  }
+  const onFileChange = (ev: Event) => {
+    const input = ev.target as HTMLInputElement | null
+    if (input?.type === 'file' && input.files?.length) void inspectFiles(Array.from(input.files))
+  }
+  const onDrop = (ev: DragEvent) => {
+    const files = ev.dataTransfer?.files
+    if (files?.length) void inspectFiles(Array.from(files))
+  }
+  document.addEventListener('change', onFileChange, true)
+  document.addEventListener('drop', onDrop, true)
+
   const offClick = action.onClick(open)
   const offMsg = ctx.onBackendMessage((payload) => {
     const msg = payload as { type?: string; error?: string }
@@ -297,6 +322,8 @@ export function setup(ctx: SpindleFrontendContext) {
     offClick()
     offMsg()
     document.removeEventListener('click', onDocClick, true)
+    document.removeEventListener('change', onFileChange, true)
+    document.removeEventListener('drop', onDrop, true)
     action.destroy()
     modal?.dismiss()
   }
