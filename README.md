@@ -3,7 +3,7 @@
 RisuAI 카드를 **변환하지 않고 원본 그대로** Lumiverse에서 쓰기 위한 Spindle 확장입니다.
 Runs original RisuAI cards in Lumiverse without converting them.
 
-## 지금 되는 것 (1~3단계)
+## 지금 되는 것 (1~4단계)
 
 - 리스 CBS 문법 해석: `{{#when}}`, `{{#if}}`, `{{#if_pure}}`, `{{:else}}`, `{{/}}`, `{{#each}}`/`{{slot}}`, `{{#func}}`/`{{call}}`/`{{arg}}`
 - 변수: `{{getvar}}`, `{{setvar}}`, `{{addvar}}`, `{{settempvar}}`/`{{gettempvar}}`, 카드의 기본 변수(defaultVariables)
@@ -33,19 +33,30 @@ Lumiverse는 리스 카드의 정규식을 가져올 때 켜짐/꺼짐을 거꾸
 
 알려진 한계: Lumiverse가 가져올 때 정규식의 커스텀 플래그(`<move_top>`, `i` 등)를 버려서 복구할 수 없습니다.
 
-## 다음 단계
+## 버튼과 Lua (4단계)
 
-- 4단계: `{{button}}` 메뉴와 간단한 Lua 트리거
+Lumiverse는 카드를 가져올 때 리스의 트리거와 Lua를 버립니다. 그래서 **원본 카드 파일을 한 번 연결**해야 합니다.
+⋯ → 리스 토글 → "버튼·Lua" 칸의 **원본 파일 연결**에서 처음 가져왔던 .charx / .png / .jpeg를 고르면 됩니다
+(파일은 브라우저에서 읽고, 트리거와 정규식 설정만 캐릭터에 저장해요).
+
+- `risu-btn="..."` → Lua `onButtonClick`, `risu-trigger="이름"` / `{{button::글자::이름}}` → Lua 함수나 수동 트리거
+- Lua: `getChatVar`/`setChatVar`, `getGlobalVar`(토글), `reloadDisplay`, `async` + `:await()`, `alertInput`/`alertNormal`/`alertSelect`, `getUserLastMessage`, `listenEdit("editRequest")`(보내기 전 프롬프트 수정: 루안 랜덤 이벤트 등)
+- 수동 트리거의 변수 설정(`v2SetVar`, `setvar`)
+- 원본을 연결하면 정규식 커스텀 플래그(`<move_top>`, `i` 등)도 되살립니다
+- 리스가 붙이는 `x-risu-` 클래스 접두어를 정리해서 선택 버튼 강조 같은 디자인이 그대로 나옵니다
+- 카드 Lua는 파일·네트워크·시스템에 접근할 수 없게 막혀 있습니다
+
+아직 안 되는 것: LLM 호출(`LLM`, `axLLM`), 채팅 내용 직접 수정(`setChat`, `addChat`), 로어북 추가 같은 고급 Lua, 수동 트리거의 조건문.
 
 ## 설치
 
 Lumiverse → Extensions → Install from GitHub → 이 저장소 주소.
-권한 `macro_interceptor`, `characters`, `chats`, `regex_scripts`, `regex_scripts_unrestricted`를 허용해 주세요.
+권한 `macro_interceptor`, `characters`, `chats`, `chat_mutation`(메시지 읽기), `regex_scripts`, `regex_scripts_unrestricted`, `interceptor`(editRequest)를 허용해 주세요.
 
 ## 개발
 
 ```
 bun install
 bun test
-bun run build
+bun run build   # build.ts: fengari의 파일/프로세스 기능을 빼고 묶습니다
 ```

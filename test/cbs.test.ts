@@ -133,3 +133,49 @@ describe('Risu regex repair', () => {
     expect(backgroundStyles('<style>a</style><div></div><style>b</style>')).toBe('<style>a</style>\n<style>b</style>')
   })
 })
+
+import { RisuLua } from '../src/lua'
+import { runSimpleTrigger, findManualTrigger } from '../src/triggers'
+describe('Lua and triggers', () => {
+  const mkHost = (vars: Record<string, string>) => ({
+    getChatVar: (k: string) => vars[k] ?? 'null', setChatVar: (k: string, v: string) => { vars[k] = v }, getGlobalVar: () => 'null',
+    prompt: async () => 'typed', userLastMessage: () => '', charLastMessage: () => '', names: { user: 'U', char: 'C' }, reloadDisplay: () => {}, log: () => {},
+  })
+  test('functions, onButtonClick with async + alertInput:await()', async () => {
+    const vars: Record<string, string> = {}
+    const rt = new RisuLua(mkHost(vars))
+    expect(rt.load(`
+      function pick(id) setChatVar(id, "lang", "en") end
+      onButtonClick = async(function(id, code)
+        local v = alertInput(id, "say"):await()
+        setChatVar(id, "btn", code .. ":" .. v)
+      end)
+      listenEdit("editRequest", function(id, data) data[#data].content = data[#data].content .. "!" ; return data end)`)).toBe(true)
+    await rt.call('pick', ['t'])
+    await rt.call('onButtonClick', ['t', 'a;b'])
+    expect(vars).toEqual({ lang: 'en', btn: 'a;b:typed' })
+    expect(await rt.runListeners('editRequest', [{ role: 'user', content: 'hi' }])).toEqual([{ role: 'user', content: 'hi!' }])
+  })
+  test('card code cannot reach files or the OS shell', () => {
+    const rt = new RisuLua(mkHost({}))
+    rt.load('x = io') ; rt.load('os.execute("ls")')
+    expect(rt.errors.length).toBe(1)
+  })
+  test('manual v2 triggers set variables', () => {
+    const vars: Record<string, string> = { n: '2' }
+    const triggers = [{ comment: 'l1', type: 'manual', effect: [{ type: 'v2SetVar', operator: '=', var: 'tiger', value: '0', valueType: 'value' }, { type: 'v2SetVar', operator: '+=', var: 'n', value: '3', valueType: 'value' }] }]
+    runSimpleTrigger(findManualTrigger(triggers, 'l1')!, mkHost(vars))
+    expect(vars).toEqual({ n: '5', tiger: '0' })
+  })
+})
+
+import { moveTop, risuFlags } from '../src/regex-sync'
+test('move_top puts the replacement first', () => {
+  const m = moveTop('\\[(.*?)\\|(.*?)\\]', '<b>$1/$2</b>')
+  expect('x [A|B] y'.replace(new RegExp(m.find, risuFlags({ in: '', flag: 'g<move_top>i', ableFlag: true }).flags), m.out)).toBe('<b>A/B</b>x  y')
+})
+
+test('x-risu- prefixes are normalised in styles and HTML', () => {
+  const d = fixFor({ id: 'x', name: 'n', find_regex: 'a', flags: 'g', placement: [], target: ['display'], substitute_macros: 'none', disabled: true, replace_string: '<span class="x-risu-on">$1</span>', metadata: { original_type: 'editdisplay' } }, '<style>.a.x-risu-on{}</style>')
+  expect(d.replace_string).toBe('<style>.a.on{}</style>\n<span class="on">$1</span>')
+})

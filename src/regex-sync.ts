@@ -21,9 +21,52 @@ export interface ImportedScript {
   can_mutate?: boolean
 }
 
-export const SYNC_VERSION = 1
+import type { RisuRegexSource } from './risu-file'
+
+export const SYNC_VERSION = 2
+
+/** Number of capturing groups in a JS regex source. */
+export function countGroups(src: string): number {
+  let n = 0
+  let inClass = false
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i]
+    if (c === '\\') { i++; continue }
+    if (inClass) { if (c === ']') inClass = false; continue }
+    if (c === '[') { inClass = true; continue }
+    if (c !== '(') continue
+    if (src[i + 1] !== '?') { n++; continue }
+    if (src[i + 2] === '<' && src[i + 3] !== '=' && src[i + 3] !== '!') n++
+  }
+  return n
+}
+
+/**
+ * Risu's `<move_top>` flag puts the replacement at the very top of the message.
+ * Emulate it with one anchored match: (before)(match)(after) -> replacement + before + after.
+ */
+export function moveTop(find: string, out: string): { find: string; out: string } {
+  const n = countGroups(find)
+  const shifted = out.replace(/\$(\$|&|\d{1,2})/g, (m, g) => {
+    if (g === '$') return '$$'
+    if (g === '&') return '$2'
+    return `$${Number(g) + 2}`
+  })
+  return { find: `^([\\s\\S]*?)(${find})([\\s\\S]*)$`, out: `${shifted}$1$${n + 3}` }
+}
+
+/** Flags Risu would actually use for this script. */
+export function risuFlags(orig: RisuRegexSource | undefined): { flags: string; moveTop: boolean } {
+  if (!orig || !orig.ableFlag || !orig.flag) return { flags: 'g', moveTop: false }
+  const raw = orig.flag
+  const moveTop = /<move_top>/i.test(raw)
+  let letters = [...new Set(raw.replace(/<[^>]*>/g, '').replace(/[^gimsuy]/g, '').split(''))].join('')
+  if (moveTop) letters = letters.replace(/[gm]/g, '')
+  return { flags: letters, moveTop }
+}
 
 export interface ScriptFix {
+  find_regex?: string
   replace_string: string
   flags: string
   placement: string[]
@@ -45,13 +88,22 @@ export function isRisuImported(s: ImportedScript): boolean {
   return (s.metadata as Record<string, unknown> | null | undefined)?.source === 'risuai_module'
 }
 
-export function alreadySynced(s: ImportedScript): boolean {
+export function alreadySynced(s: ImportedScript, linked = false): boolean {
   const meta = (s.metadata ?? {}) as Record<string, any>
-  return meta.risubridge?.version === SYNC_VERSION
+  return meta.risubridge?.version === SYNC_VERSION && (!linked || meta.risubridge?.linked === true)
+}
+
+/** Match an imported script to its entry in the original file (same order, same pattern). */
+export function matchOriginal(s: ImportedScript, originals: RisuRegexSource[] | undefined): RisuRegexSource | undefined {
+  if (!originals?.length) return undefined
+  const meta = (s.metadata ?? {}) as Record<string, any>
+  const find = meta.risubridge?.original?.find_regex ?? s.find_regex
+  return originals.find((o) => o.in === find && (o.comment ?? '') === s.name.replace(/^Imported RisuAI Script \d+$/, ''))
+    ?? originals.find((o) => o.in === find)
 }
 
 /** Compute the Risu-faithful settings for one imported script. */
-export function fixFor(s: ImportedScript, bgStyles: string): ScriptFix {
+export function fixFor(s: ImportedScript, bgStyles: string, orig?: RisuRegexSource): ScriptFix {
   const meta = { ...((s.metadata ?? {}) as Record<string, unknown>) }
   const type = String(meta.original_type ?? 'editdisplay')
   const original = (meta.risubridge as any)?.original ?? {
@@ -61,8 +113,13 @@ export function fixFor(s: ImportedScript, bgStyles: string): ScriptFix {
     target: s.target,
     substitute_macros: s.substitute_macros,
     disabled: s.disabled,
+    find_regex: s.find_regex,
   }
-  const out = original.replace_string as string
+  // Risu prefixes every class/id with `x-risu-` in both HTML and CSS; creators sometimes
+  // write the prefix by hand. Drop it everywhere so HTML and CSS keep matching here.
+  const unprefix = (t: string) => t.replace(/x-risu-/g, '')
+  const out = unprefix(original.replace_string as string)
+  bgStyles = unprefix(bgStyles)
 
   let target = 'display'
   let placement = ['ai_output', 'user_input']
@@ -73,15 +130,18 @@ export function fixFor(s: ImportedScript, bgStyles: string): ScriptFix {
   // Display HTML is rendered in an isolated island; carry the card's stylesheet into it,
   // which also keeps rules like `img { ... }` from leaking into the rest of Lumiverse.
   const withStyles = target === 'display' && bgStyles && HTML_RE.test(out) ? `${bgStyles}\n${out}` : out
+  const f = risuFlags(orig)
+  const moved = f.moveTop ? moveTop(original.find_regex ?? s.find_regex, withStyles) : null
 
   return {
-    replace_string: withStyles,
-    flags: 'g',
+    ...(moved ? { find_regex: moved.find } : original.find_regex && original.find_regex !== s.find_regex ? { find_regex: original.find_regex } : {}),
+    replace_string: moved ? moved.out : withStyles,
+    flags: f.flags,
     placement,
     target,
     substitute_macros: 'raw',
     disabled: type === 'disabled',
-    metadata: { ...meta, risubridge: { version: SYNC_VERSION, original } },
+    metadata: { ...meta, risubridge: { version: SYNC_VERSION, original, linked: Boolean(orig) } },
   }
 }
 
@@ -92,6 +152,7 @@ export function revertFor(s: ImportedScript): Partial<ScriptFix> | null {
   if (!original) return null
   delete meta.risubridge
   return {
+    ...(original.find_regex ? { find_regex: original.find_regex } : {}),
     replace_string: original.replace_string,
     flags: original.flags,
     placement: original.placement,

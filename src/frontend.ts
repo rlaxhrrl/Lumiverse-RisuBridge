@@ -1,5 +1,6 @@
 import type { SpindleFrontendContext, SpindleModalHandle } from 'lumiverse-spindle-types'
 import type { ToggleRow, TogglesReply } from './toggles'
+import { readRisuFile } from './risu-file'
 
 const ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="6" width="22" height="12" rx="6"/><circle cx="16" cy="12" r="3"/></svg>'
 
@@ -146,6 +147,7 @@ export function setup(ctx: SpindleFrontendContext) {
       box.append(title, line)
       body.append(box)
     }
+    if (reply.isRisu) body.append(linkBox(reply))
     if (!settable.length && !(reply.regex && reply.regex.total > 0)) return
     const foot = document.createElement('div')
     foot.className = 'rb-foot'
@@ -161,16 +163,140 @@ export function setup(ctx: SpindleFrontendContext) {
     body.append(foot)
   }
 
+  function linkBox(reply: TogglesReply): HTMLElement {
+    const box = document.createElement('div')
+    box.className = 'rb-regex'
+    const title = document.createElement('div')
+    title.className = 'rb-group'
+    title.style.marginTop = '0'
+    title.textContent = '버튼·Lua (원본 카드 파일)'
+    const line = document.createElement('div')
+    line.className = 'rb-regex-row'
+    const info = document.createElement('span')
+    const l = reply.linked
+    info.textContent = l
+      ? `연결됨${l.lua ? ' · Lua 있음' : ''}${l.manual ? ` · 버튼 트리거 ${l.manual}개` : ''}`
+      : 'Lumiverse가 가져올 때 버튼 동작(Lua·트리거)을 버려요. 원본 파일을 한 번 연결해 주세요.'
+    const btn = document.createElement('button')
+    btn.className = 'rb-btn'
+    btn.textContent = l ? '다시 연결' : '원본 파일 연결'
+    btn.addEventListener('click', async () => {
+      try {
+        const files = await ctx.uploads.pickFile({ accept: ['.charx', '.png', '.jpeg', '.jpg', '.risum'], maxSizeBytes: 200 * 1024 * 1024 })
+        const f = files?.[0]
+        if (!f) return
+        const data = readRisuFile(f.bytes)
+        if ('error' in data) { info.textContent = data.error; return }
+        info.textContent = '연결하는 중…'
+        btn.disabled = true
+        send({ type: 'link_original', chatId: currentChat, data })
+      } catch (err) {
+        info.textContent = `파일을 읽지 못했어요: ${err instanceof Error ? err.message : String(err)}`
+      }
+    })
+    line.append(info, btn)
+    box.append(title, line)
+    return box
+  }
+
+  // ── Risu buttons inside messages ──
+  function findRisuTarget(ev: Event): { kind: 'btn' | 'trigger'; value: string } | null {
+    for (const node of ev.composedPath()) {
+      if (!(node instanceof Element)) continue
+      const btn = node.getAttribute('risu-btn')
+      if (btn !== null) return { kind: 'btn', value: btn }
+      const trig = node.getAttribute('risu-trigger') ?? node.getAttribute('data-risu-trigger')
+      if (trig !== null && trig !== '') return { kind: 'trigger', value: trig }
+    }
+    return null
+  }
+  const onDocClick = (ev: Event) => {
+    const hit = findRisuTarget(ev)
+    if (!hit) return
+    const chatId = ctx.getActiveChat().chatId
+    if (!chatId) return
+    ev.preventDefault()
+    ev.stopPropagation()
+    send({ type: 'risu_click', chatId, kind: hit.kind, value: hit.value })
+  }
+  document.addEventListener('click', onDocClick, true)
+
+  function showPrompt(msg: { id: string; message?: string; kind?: string; options?: string[] }) {
+    const m = ctx.ui.showModal({ title: msg.kind === 'normal' ? '알림' : '입력', width: 420 })
+    const wrap = document.createElement('div')
+    wrap.className = 'rb-wrap'
+    const style = document.createElement('style')
+    style.textContent = CSS
+    const text = document.createElement('div')
+    text.style.whiteSpace = 'pre-wrap'
+    text.textContent = msg.message ?? ''
+    wrap.append(text)
+    let answered = false
+    const reply = (value: string | null) => { if (answered) return; answered = true; send({ type: 'risu_prompt_reply', id: msg.id, value }); m.dismiss() }
+    const foot = document.createElement('div')
+    foot.className = 'rb-foot'
+    if (msg.kind === 'select') {
+      (msg.options ?? []).forEach((opt, i) => {
+        const b = document.createElement('button')
+        b.className = 'rb-btn'
+        b.textContent = opt
+        b.addEventListener('click', () => reply(String(i)))
+        wrap.append(b)
+      })
+    } else if (msg.kind === 'input') {
+      const input = document.createElement('textarea')
+      input.rows = 3
+      input.style.cssText = 'width:100%;box-sizing:border-box;padding:8px;border-radius:8px;background:transparent;color:inherit;border:1px solid color-mix(in srgb,currentColor 25%,transparent);font:inherit'
+      wrap.append(input)
+      const ok = document.createElement('button')
+      ok.className = 'rb-btn'
+      ok.textContent = '확인'
+      ok.addEventListener('click', () => reply(input.value))
+      const cancel = document.createElement('button')
+      cancel.className = 'rb-btn'
+      cancel.textContent = '취소'
+      cancel.addEventListener('click', () => reply(null))
+      foot.append(cancel, ok)
+      setTimeout(() => input.focus(), 50)
+    } else {
+      const ok = document.createElement('button')
+      ok.className = 'rb-btn'
+      ok.textContent = '확인'
+      ok.addEventListener('click', () => reply(''))
+      foot.append(document.createElement('span'), ok)
+    }
+    wrap.append(foot)
+    m.root.append(style, wrap)
+    m.onDismiss(() => reply(null))
+  }
+
+  function notice(message: string) {
+    const m = ctx.ui.showModal({ title: '리스 버튼', width: 400 })
+    const d = document.createElement('div')
+    d.style.cssText = 'font-size:14px;line-height:1.5'
+    d.textContent = message
+    m.root.append(d)
+  }
+
+  /** Re-render chat messages after variables changed (Risu's reloadDisplay). */
+  function refreshDisplay() {
+    try { (ctx as unknown as { display?: { invalidate(v: string[]): void } }).display?.invalidate(['*']) } catch { /* older host */ }
+  }
+
   const offClick = action.onClick(open)
   const offMsg = ctx.onBackendMessage((payload) => {
     const msg = payload as { type?: string; error?: string }
-    if (msg?.type === 'toggles') render(payload as TogglesReply)
+    if (msg?.type === 'risu_reload') { refreshDisplay(); return }
+    if (msg?.type === 'toggles') { render(payload as TogglesReply); refreshDisplay() }
+    else if (msg?.type === 'risu_prompt') showPrompt(payload as { id: string; message?: string; kind?: string; options?: string[] })
+    else if (msg?.type === 'risu_notice') notice(String((payload as { message?: string }).message ?? ''))
     else if (msg?.type === 'toggles_error' && body) body.textContent = msg.error === 'no_chat' ? '채팅을 찾을 수 없어요.' : `오류: ${msg.error}`
   })
 
   return () => {
     offClick()
     offMsg()
+    document.removeEventListener('click', onDocClick, true)
     action.destroy()
     modal?.dismiss()
   }

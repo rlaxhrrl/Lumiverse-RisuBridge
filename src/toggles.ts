@@ -44,4 +44,5 @@ export interface TogglesReply {
   rows: ToggleRow[]
   regex?: { total: number; synced: number; active: number }
   regexOptOut?: boolean
+  linked?: { cardName: string; linkedAt: number; lua: boolean; manual: number }
 }

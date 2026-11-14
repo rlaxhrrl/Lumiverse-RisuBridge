@@ -1,15 +1,19 @@
 {
   "name": "risubridge-spindle-extension",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "bun build src/backend.ts --target=bun --format=esm --outfile=dist/backend.js && bun build src/frontend.ts --target=browser --format=esm --outfile=dist/frontend.js",
+    "build": "bun run build.ts",
     "typecheck": "bunx tsc --noEmit",
     "test": "bun test"
   },
   "devDependencies": {
-    "lumiverse-spindle-types": "^0.6.49",
-    "typescript": "^5.8.3"
+    "lumiverse-spindle-types": "0.6.49",
+    "typescript": "5.8.3"
+  },
+  "dependencies": {
+    "fengari": "0.1.4",
+    "fflate": "0.8.2"
   }
 }

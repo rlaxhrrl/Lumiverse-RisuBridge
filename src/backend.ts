@@ -1,7 +1,10 @@
 /// <reference types="lumiverse-spindle-types" />
 import type { MacroInterceptorCtxDTO, MacroInterceptorResultDTO, SpindleAPI } from 'lumiverse-spindle-types'
 import { toggleLayout, type TogglesReply } from './toggles'
-import { alreadySynced, backgroundStyles, fixFor, isRisuImported, revertFor, type ImportedScript } from './regex-sync'
+import { alreadySynced, backgroundStyles, fixFor, isRisuImported, matchOriginal, revertFor, type ImportedScript } from './regex-sync'
+import type { LinkedRisuData } from './risu-file'
+import { findManualTrigger, loadLua, runSimpleTrigger, type RisuTrigger } from './triggers'
+import type { LuaHost } from './lua'
 import { renderCbs, hasRisuSyntax, parseToggles, defaultToggleValue, parseDefaultVariables, type ToggleDef, type CbsPhase } from './cbs'
 
 declare const spindle: SpindleAPI
@@ -163,11 +166,12 @@ async function syncCharacterRegex(characterId: string, userId: string | undefine
   const ext = (ch?.extensions ?? {}) as Record<string, any>
   if (!ext.risuai || ext.risubridge?.regex === false) return 0
   const styles = backgroundStyles(ext.risuai.backgroundHTML)
+  const linked = ext.risubridge?.module as LinkedRisuData | undefined
   let fixed = 0
   for (const s of await characterScripts(characterId, userId)) {
-    if (!force && alreadySynced(s)) continue
+    if (!force && alreadySynced(s, Boolean(linked))) continue
     if (s.can_mutate === false) continue
-    const fix = fixFor(s, styles)
+    const fix = fixFor(s, styles, matchOriginal(s, linked?.regex))
     await spindle.regex_scripts.update(s.id, fix as never, userId)
     fixed++
   }
@@ -188,7 +192,7 @@ async function revertCharacterRegex(characterId: string, userId: string | undefi
 
 async function regexStatus(characterId: string, userId: string) {
   const all = await characterScripts(characterId, userId)
-  return { total: all.length, synced: all.filter(alreadySynced).length, active: all.filter((s) => alreadySynced(s) && !s.disabled).length }
+  return { total: all.length, synced: all.filter((s) => alreadySynced(s)).length, active: all.filter((s) => alreadySynced(s) && !s.disabled).length }
 }
 
 /** Sweep every Risu card once at startup (covers cards imported before the extension). */
@@ -233,8 +237,107 @@ async function buildTogglesReply(chatId: string, characterId: string, userId: st
     rows: toggleLayout(src, (k) => vars[`toggle_${k}`]),
     regex: risu ? await regexStatus(characterId, userId).catch(() => undefined) : undefined,
     regexOptOut: (ch?.extensions as Record<string, any> | undefined)?.risubridge?.regex === false,
+    linked: linkedInfo((ch?.extensions as Record<string, any> | undefined)?.risubridge?.module),
   }
 }
+
+function linkedInfo(mod: LinkedRisuData | undefined) {
+  if (!mod) return undefined
+  const lua = (mod.triggers as RisuTrigger[]).some((t) => (t.effect ?? []).some((e) => e?.type === 'triggerlua' && String(e.code ?? '').trim()))
+  const manual = (mod.triggers as RisuTrigger[]).filter((t) => t?.type === 'manual').length
+  return { cardName: mod.cardName, linkedAt: mod.linkedAt, lua, manual }
+}
+
+// ─────────── stage 4: buttons, Lua, prompt hooks ───────────
+
+const pendingPrompts = new Map<string, (value: string | null) => void>()
+
+async function luaHostFor(chatId: string, characterId: string, userId: string, onReload: () => void) {
+  const ch = await spindle.characters.get(characterId, userId)
+  const ext = (ch?.extensions ?? {}) as Record<string, any>
+  const mod = ext.risubridge?.module as LinkedRisuData | undefined
+  const vars: Record<string, string> = { ...(await spindle.variables.chat.list(chatId).catch(() => ({}))) }
+  const dirty = new Map<string, string>()
+  const toggleDefs = new Map(parseToggles(typeof ext.risuai?.toggles === 'string' ? ext.risuai.toggles : '').map((t) => [t.key, t]))
+  const defaults = parseDefaultVariables(typeof ext.risuai?.defaultVariables === 'string' ? ext.risuai.defaultVariables : '')
+  const messages = (await spindle.chat.getMessages(chatId).catch(() => [])) as Array<{ content?: string; is_user?: boolean }>
+  const host: LuaHost = {
+    getChatVar: (k) => vars[k] ?? defaults[k] ?? 'null',
+    setChatVar: (k, v) => { vars[k] = v; dirty.set(k, v) },
+    getGlobalVar: (k) => {
+      if (k.startsWith('toggle_')) return vars[k] ?? defaultToggleValue(toggleDefs.get(k.slice(7)))
+      return 'null'
+    },
+    prompt: (message, kind, options) => new Promise((resolve) => {
+      const id = crypto.randomUUID()
+      pendingPrompts.set(id, resolve)
+      spindle.sendToFrontend({ type: 'risu_prompt', id, chatId, message, kind, options }, userId)
+      setTimeout(() => { if (pendingPrompts.delete(id)) resolve(null) }, 10 * 60_000)
+    }),
+    userLastMessage: () => [...messages].reverse().find((m) => m?.is_user)?.content ?? '',
+    charLastMessage: () => [...messages].reverse().find((m) => m && !m.is_user)?.content ?? '',
+    names: { user: 'User', char: ch?.name ?? '' },
+    reloadDisplay: onReload,
+    log: (t) => spindle.log.info(`[risubridge:lua] ${t}`),
+  }
+  const flush = async () => {
+    for (const [k, v] of dirty) await spindle.variables.chat.set(chatId, k, v)
+    const n = dirty.size
+    dirty.clear()
+    return n
+  }
+  return { host, flush, mod }
+}
+
+async function handleClick(chatId: string, characterId: string, userId: string, kind: string, value: string) {
+  let reload = false
+  const { host, flush, mod } = await luaHostFor(chatId, characterId, userId, () => { reload = true })
+  if (!mod) {
+    spindle.sendToFrontend({ type: 'risu_notice', chatId, message: '이 버튼을 쓰려면 ⋯ → 리스 토글에서 원본 카드 파일을 한 번 연결해 주세요.' }, userId)
+    return
+  }
+  const triggers = mod.triggers as RisuTrigger[]
+  const rt = loadLua(triggers, host)
+  let handled = false
+  if (kind === 'btn') {
+    if (rt?.hasFunction('onButtonClick')) { await rt.call('onButtonClick', ['risubridge', value]); handled = true }
+  } else {
+    if (rt?.hasFunction(value)) { await rt.call(value, ['risubridge']); handled = true }
+    else {
+      const t = findManualTrigger(triggers, value)
+      if (t) { runSimpleTrigger(t, host); handled = true }
+    }
+  }
+  if (rt?.errors.length) spindle.log.warn(`[risubridge] Lua: ${rt.errors.join(' | ').slice(0, 500)}`)
+  const changed = await flush()
+  if (!handled) spindle.log.info(`[risubridge] no handler for ${kind} "${value}"`)
+  if (changed || reload) spindle.sendToFrontend({ type: 'risu_reload', chatId }, userId)
+}
+
+/** Risu `listenEdit("editRequest")`: let card Lua edit the outgoing prompt (e.g. random events). */
+spindle.registerInterceptor(async (messages, context) => {
+  try {
+    const chat = await spindle.chats.get(context.chatId, context.userId).catch(() => null) as Record<string, any> | null
+    const characterId = chat?.character_id
+    if (!characterId) return messages
+    // Cheap check first: only cards whose linked Lua listens to editRequest pay for the rest.
+    const ch = await spindle.characters.get(characterId, context.userId).catch(() => null)
+    const linkedMod = ((ch?.extensions ?? {}) as Record<string, any>).risubridge?.module as LinkedRisuData | undefined
+    if (!linkedMod || !JSON.stringify(linkedMod.triggers ?? []).includes('editRequest')) return messages
+    const { host, flush, mod } = await luaHostFor(context.chatId, characterId, context.userId, () => {})
+    if (!mod) return messages
+    const rt = loadLua(mod.triggers as RisuTrigger[], host)
+    if (!rt || !rt.listeners.some((l) => l.kind === 'editRequest')) return messages
+    const data = messages.map((m) => ({ role: m.role, content: typeof m.content === 'string' ? m.content : m.content }))
+    const out = await rt.runListeners('editRequest', data)
+    if (!context.isDryRun) await flush()
+    if (!Array.isArray(out)) return messages
+    return out.map((m: any, i: number) => ({ ...(messages[i] ?? {}), role: m?.role ?? messages[i]?.role ?? 'user', content: typeof m?.content === 'string' ? m.content : (messages[i]?.content ?? '') })) as typeof messages
+  } catch (err) {
+    spindle.log.warn(`[risubridge] editRequest failed: ${err instanceof Error ? err.message : String(err)}`)
+    return messages
+  }
+}, 50)
 
 async function setRegexOptOut(characterId: string, userId: string, off: boolean) {
   const ch = await spindle.characters.get(characterId, userId)
@@ -246,6 +349,12 @@ async function setRegexOptOut(characterId: string, userId: string, off: boolean)
 
 spindle.onFrontendMessage(async (payload, userId) => {
   const msg = (payload ?? {}) as Record<string, unknown>
+  if (msg.type === 'risu_prompt_reply' && typeof msg.id === 'string') {
+    const resolve = pendingPrompts.get(msg.id)
+    pendingPrompts.delete(msg.id)
+    resolve?.(typeof msg.value === 'string' ? msg.value : null)
+    return
+  }
   const chatId = typeof msg.chatId === 'string' ? msg.chatId : ''
   // Trust only the chat id; the character comes from the chat itself.
   const chat = chatId ? await spindle.chats.get(chatId, userId).catch(() => null) : null
@@ -255,7 +364,28 @@ spindle.onFrontendMessage(async (payload, userId) => {
     return
   }
   try {
-    if (msg.type === 'set_toggle' && typeof msg.key === 'string' && typeof msg.value === 'string') {
+    if (msg.type === 'risu_click' && typeof msg.value === 'string' && (msg.kind === 'btn' || msg.kind === 'trigger')) {
+      await handleClick(chatId, characterId, userId, msg.kind, msg.value.slice(0, 2000))
+      return
+    }
+    if (msg.type === 'link_original' && msg.data && typeof msg.data === 'object') {
+      const data = msg.data as LinkedRisuData
+      const ch = await spindle.characters.get(characterId, userId)
+      if (ch) {
+        const ext = { ...((ch.extensions ?? {}) as Record<string, any>) }
+        const slim: LinkedRisuData = {
+          triggers: Array.isArray(data.triggers) ? data.triggers : [],
+          regex: (Array.isArray(data.regex) ? data.regex : []).map((r) => ({ comment: r.comment, in: r.in, type: r.type, flag: r.flag, ableFlag: r.ableFlag })),
+          lowLevelAccess: Boolean(data.lowLevelAccess),
+          cardName: String(data.cardName ?? ''),
+          linkedAt: Date.now(),
+        }
+        ext.risubridge = { ...(ext.risubridge ?? {}), module: slim }
+        await spindle.characters.update(characterId, { extensions: ext } as never, userId)
+        cardCache.clear()
+        if (ext.risubridge.regex !== false) await syncCharacterRegex(characterId, userId, true)
+      }
+    } else if (msg.type === 'set_toggle' && typeof msg.key === 'string' && typeof msg.value === 'string') {
       await spindle.variables.chat.set(chatId, `toggle_${msg.key}`, msg.value)
     } else if (msg.type === 'reset_toggles') {
       const vars = await spindle.variables.chat.list(chatId)
