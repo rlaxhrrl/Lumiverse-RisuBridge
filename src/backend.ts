@@ -1,5 +1,6 @@
 /// <reference types="lumiverse-spindle-types" />
 import type { MacroInterceptorCtxDTO, MacroInterceptorResultDTO, SpindleAPI } from 'lumiverse-spindle-types'
+import { toggleLayout, type TogglesReply } from './toggles'
 import { renderCbs, hasRisuSyntax, parseToggles, defaultToggleValue, parseDefaultVariables, type ToggleDef, type CbsPhase } from './cbs'
 
 declare const spindle: SpindleAPI
@@ -97,6 +98,47 @@ async function intercept(ctx: MacroInterceptorCtxDTO): Promise<MacroInterceptorR
   }
   return { text, touchedVars: [...result.touched], volatile: result.volatile }
 }
+
+// ─────────── toggle panel (frontend <-> backend) ───────────
+
+async function buildTogglesReply(chatId: string, characterId: string, userId: string): Promise<TogglesReply> {
+  const ch = await spindle.characters.get(characterId, userId)
+  const risu = (ch?.extensions as Record<string, any> | undefined)?.risuai
+  const vars = await spindle.variables.chat.list(chatId).catch(() => ({} as Record<string, string>))
+  const src = risu && typeof risu.toggles === 'string' ? risu.toggles : ''
+  return {
+    type: 'toggles',
+    chatId,
+    characterName: ch?.name ?? '',
+    isRisu: Boolean(risu),
+    rows: toggleLayout(src, (k) => vars[`toggle_${k}`]),
+  }
+}
+
+spindle.onFrontendMessage(async (payload, userId) => {
+  const msg = (payload ?? {}) as Record<string, unknown>
+  const chatId = typeof msg.chatId === 'string' ? msg.chatId : ''
+  // Trust only the chat id; the character comes from the chat itself.
+  const chat = chatId ? await spindle.chats.get(chatId, userId).catch(() => null) : null
+  const characterId = (chat as { character_id?: string } | null)?.character_id ?? ''
+  if (!chat || !characterId) {
+    spindle.sendToFrontend({ type: 'toggles_error', error: 'no_chat' }, userId)
+    return
+  }
+  try {
+    if (msg.type === 'set_toggle' && typeof msg.key === 'string' && typeof msg.value === 'string') {
+      await spindle.variables.chat.set(chatId, `toggle_${msg.key}`, msg.value)
+    } else if (msg.type === 'reset_toggles') {
+      const vars = await spindle.variables.chat.list(chatId)
+      for (const k of Object.keys(vars)) if (k.startsWith('toggle_')) await spindle.variables.chat.delete(chatId, k)
+    } else if (msg.type !== 'get_toggles') {
+      return
+    }
+    spindle.sendToFrontend(await buildTogglesReply(chatId, characterId, userId), userId)
+  } catch (err) {
+    spindle.sendToFrontend({ type: 'toggles_error', error: err instanceof Error ? err.message : String(err) }, userId)
+  }
+})
 
 spindle.registerMacroInterceptor(intercept, 10)
 spindle.log.info('[risubridge] RisuAI CBS interpreter ready')

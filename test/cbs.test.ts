@@ -100,3 +100,13 @@ describe.skipIf(!existsSync(LUAN) || !existsSync(LUAN_REF) || !existsSync(LUAN_M
     expect(checked).toBeGreaterThan(15)
   })
 })
+
+import { toggleLayout } from '../src/toggles'
+describe('toggle panel layout', () => {
+  test('keeps headers and captions, fills current values', () => {
+    const rows = toggleLayout('=⭐=group\nk=Job=select=a,b,c\n=hint=caption\n=More=divider\nh=Korean\nt=Name=text', (k) => (k === 'k' ? '2' : undefined))
+    expect(rows.map((r) => r.kind)).toEqual(['group', 'select', 'caption', 'divider', 'checkbox', 'text'])
+    expect(rows[1]).toMatchObject({ value: '2', isDefault: false, options: ['a', 'b', 'c'] })
+    expect(rows[4]).toMatchObject({ value: '0', isDefault: true })
+  })
+})

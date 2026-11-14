@@ -1,4 +1,35 @@
 // @bun
+// src/toggles.ts
+function toggleLayout(src, current) {
+  const rows = [];
+  for (const line of (src || "").split(`
+`)) {
+    const parts = line.split("=");
+    if (parts.length < 2)
+      continue;
+    const key = parts[0].trim();
+    const label = parts[1];
+    const type = (parts[2] ?? "").trim().toLowerCase();
+    if (!key) {
+      if (type === "group" || type === "divider" || type === "caption")
+        rows.push({ kind: type, label });
+      continue;
+    }
+    const v = current(key);
+    if (type === "select") {
+      const options = (parts.slice(3).join("=") || "").split(",");
+      rows.push({ kind: "select", key, label, options, value: v ?? "0", isDefault: v === undefined });
+    } else if (type === "text" || type === "textarea") {
+      rows.push({ kind: "text", key, label, value: v ?? "", isDefault: v === undefined });
+    } else if (type === "group" || type === "groupend" || type === "divider" || type === "caption") {
+      continue;
+    } else {
+      rows.push({ kind: "checkbox", key, label, value: v ?? "0", isDefault: v === undefined });
+    }
+  }
+  return rows;
+}
+
 // src/cbs.ts
 var MAX_DEPTH = 40;
 function tokenize(src) {
@@ -778,5 +809,43 @@ async function intercept(ctx) {
   }
   return { text, touchedVars: [...result.touched], volatile: result.volatile };
 }
+async function buildTogglesReply(chatId, characterId, userId) {
+  const ch = await spindle.characters.get(characterId, userId);
+  const risu = ch?.extensions?.risuai;
+  const vars = await spindle.variables.chat.list(chatId).catch(() => ({}));
+  const src = risu && typeof risu.toggles === "string" ? risu.toggles : "";
+  return {
+    type: "toggles",
+    chatId,
+    characterName: ch?.name ?? "",
+    isRisu: Boolean(risu),
+    rows: toggleLayout(src, (k) => vars[`toggle_${k}`])
+  };
+}
+spindle.onFrontendMessage(async (payload, userId) => {
+  const msg = payload ?? {};
+  const chatId = typeof msg.chatId === "string" ? msg.chatId : "";
+  const chat = chatId ? await spindle.chats.get(chatId, userId).catch(() => null) : null;
+  const characterId = chat?.character_id ?? "";
+  if (!chat || !characterId) {
+    spindle.sendToFrontend({ type: "toggles_error", error: "no_chat" }, userId);
+    return;
+  }
+  try {
+    if (msg.type === "set_toggle" && typeof msg.key === "string" && typeof msg.value === "string") {
+      await spindle.variables.chat.set(chatId, `toggle_${msg.key}`, msg.value);
+    } else if (msg.type === "reset_toggles") {
+      const vars = await spindle.variables.chat.list(chatId);
+      for (const k of Object.keys(vars))
+        if (k.startsWith("toggle_"))
+          await spindle.variables.chat.delete(chatId, k);
+    } else if (msg.type !== "get_toggles") {
+      return;
+    }
+    spindle.sendToFrontend(await buildTogglesReply(chatId, characterId, userId), userId);
+  } catch (err) {
+    spindle.sendToFrontend({ type: "toggles_error", error: err instanceof Error ? err.message : String(err) }, userId);
+  }
+});
 spindle.registerMacroInterceptor(intercept, 10);
 spindle.log.info("[risubridge] RisuAI CBS interpreter ready");

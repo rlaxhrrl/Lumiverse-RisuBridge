@@ -1,10 +1,10 @@
 {
   "name": "risubridge-spindle-extension",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "bun build src/backend.ts --target=bun --format=esm --outfile=dist/backend.js",
+    "build": "bun build src/backend.ts --target=bun --format=esm --outfile=dist/backend.js && bun build src/frontend.ts --target=browser --format=esm --outfile=dist/frontend.js",
     "typecheck": "bunx tsc --noEmit",
     "test": "bun test"
   },
