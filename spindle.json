@@ -1,0 +1,12 @@
+{
+  "version": "0.1.0",
+  "name": "Risu Bridge",
+  "identifier": "risubridge",
+  "author": "rlaxhrrl",
+  "github": "https://github.com/rlaxhrrl/Lumiverse-RisuBridge",
+  "homepage": "https://github.com/rlaxhrrl/Lumiverse-RisuBridge",
+  "description": "Runs original RisuAI character cards in Lumiverse: interprets Risu CBS syntax (#when, #if, getvar, toggles, math, arrays, functions) in prompts and in the chat display, without converting the card.",
+  "permissions": ["macro_interceptor", "characters"],
+  "entry_backend": "dist/backend.js",
+  "minimum_lumiverse_version": "1.2.0"
+}
