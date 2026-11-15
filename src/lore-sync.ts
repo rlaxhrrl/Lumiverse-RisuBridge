@@ -10,7 +10,7 @@
  * Each repaired entry keeps the values Lumiverse imported so the change can be undone.
  */
 
-export const LORE_SYNC_VERSION = 1
+export const LORE_SYNC_VERSION = 2
 /** RisuAI's default lorebook scan depth when the card does not set one. */
 export const RISU_DEFAULT_SCAN_DEPTH = 5
 
@@ -110,7 +110,7 @@ export function matchCardEntry(e: LoreEntry, card: CardLoreEntry[]): CardLoreEnt
 }
 
 /** Settings that make one imported entry behave like it does in Risu, or null if nothing changes. */
-export function loreFixFor(e: LoreEntry, cardScanDepth: number | undefined): LoreUpdate | null {
+export function loreFixFor(e: LoreEntry, cardScanDepth: number | undefined, cardRecursive?: boolean): LoreUpdate | null {
   const original = (e.extensions?.risubridge as any)?.original ?? Object.fromEntries(FIELDS.map((f) => [f, e[f]]))
   const base = { ...e, ...original } as LoreEntry
   const { decorators: d, content } = parseDecorators(base.content)
@@ -122,6 +122,8 @@ export function loreFixFor(e: LoreEntry, cardScanDepth: number | undefined): Lor
   if (d.activate) out.constant = true
   if (d.dontActivate) out.disabled = true
   if (d.recursive !== undefined) out.prevent_recursion = !d.recursive
+  // Risu only scans lorebook text for more keywords when the card turns recursive scanning on.
+  else if (cardRecursive === false) out.prevent_recursion = true
   if (d.probability !== undefined) { out.use_probability = true; out.probability = Math.max(0, Math.min(100, d.probability)) }
   if (d.fullWord !== undefined) out.match_whole_words = d.fullWord
   // Lumiverse has one secondary key list; only map it when the entry does not use one already.

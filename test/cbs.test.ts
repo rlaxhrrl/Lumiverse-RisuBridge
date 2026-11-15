@@ -267,3 +267,9 @@ test('css: full-height panels stop above the input bar', () => {
   expect(keepAboveInput('max-height:calc(100dvh - 40px);height:100vh;width:100vw'))
     .toBe('max-height:calc(calc(100dvh - var(--risu-safe-bottom, 0px)) - 40px);height:calc(100vh - var(--risu-safe-bottom, 0px));width:100vw')
 })
+
+test('lore: cards with recursive scanning off do not chain entries', () => {
+  expect(loreFixFor(loreEntry(), 5, false)!.prevent_recursion).toBe(true)
+  expect(loreFixFor(loreEntry({ content: '@@recursive\nX' }), 5, false)!.prevent_recursion).toBe(false)
+  expect(loreFixFor(loreEntry(), 5, true)!.prevent_recursion).toBeUndefined()
+})

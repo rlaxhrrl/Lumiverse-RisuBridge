@@ -203,7 +203,7 @@ async function syncCharacterRegex(characterId: string, userId: string | undefine
  */
 async function syncCharacterLore(ch: Awaited<ReturnType<SpindleAPI['characters']['get']>>, userId: string | undefined, force = false): Promise<number> {
   const ext = (ch?.extensions ?? {}) as Record<string, any>
-  const book = ext.character_book as { scan_depth?: number; entries?: CardLoreEntry[] } | undefined
+  const book = ext.character_book as { scan_depth?: number; recursive_scanning?: boolean; entries?: CardLoreEntry[] } | undefined
   if (!ch || !ext.risuai || !book?.entries?.length || !(spindle as any).world_books) return 0
   const cardDepth = typeof book.scan_depth === 'number' ? book.scan_depth : undefined
   let fixed = 0
@@ -213,7 +213,7 @@ async function syncCharacterLore(ch: Awaited<ReturnType<SpindleAPI['characters']
       for (const e of page.data as unknown as LoreEntry[]) {
         if (!force && isLoreSynced(e)) continue
         if (!matchCardEntry(e, book.entries)) continue
-        const fix = loreFixFor(e, cardDepth)
+        const fix = loreFixFor(e, cardDepth, typeof book.recursive_scanning === 'boolean' ? book.recursive_scanning : undefined)
         if (!fix) continue
         await spindle.world_books.entries.update(e.id, fix as never, userId)
         fixed++

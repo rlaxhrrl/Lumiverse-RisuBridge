@@ -14392,7 +14392,7 @@ function cssFor(styles, out) {
 }
 
 // src/lore-sync.ts
-var LORE_SYNC_VERSION = 1;
+var LORE_SYNC_VERSION = 2;
 var RISU_DEFAULT_SCAN_DEPTH = 5;
 var FIELDS = [
   "content",
@@ -14490,7 +14490,7 @@ function matchCardEntry(e, card) {
   const content = e.extensions?.risubridge?.original?.content ?? e.content;
   return card.find((c) => (c.content ?? "") === content && (c.comment ?? c.name ?? "") === (e.comment ?? "")) ?? card.find((c) => (c.content ?? "") === content);
 }
-function loreFixFor(e, cardScanDepth) {
+function loreFixFor(e, cardScanDepth, cardRecursive) {
   const original = e.extensions?.risubridge?.original ?? Object.fromEntries(FIELDS.map((f) => [f, e[f]]));
   const base = { ...e, ...original };
   const { decorators: d, content } = parseDecorators(base.content);
@@ -14509,6 +14509,8 @@ function loreFixFor(e, cardScanDepth) {
     out.disabled = true;
   if (d.recursive !== undefined)
     out.prevent_recursion = !d.recursive;
+  else if (cardRecursive === false)
+    out.prevent_recursion = true;
   if (d.probability !== undefined) {
     out.use_probability = true;
     out.probability = Math.max(0, Math.min(100, d.probability));
@@ -15812,7 +15814,7 @@ async function syncCharacterLore(ch, userId, force = false) {
           continue;
         if (!matchCardEntry(e, book.entries))
           continue;
-        const fix = loreFixFor(e, cardDepth);
+        const fix = loreFixFor(e, cardDepth, typeof book.recursive_scanning === "boolean" ? book.recursive_scanning : undefined);
         if (!fix)
           continue;
         await spindle.world_books.entries.update(e.id, fix, userId);
